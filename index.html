@@ -2,10 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Raymarching SDF – Kugel</title>
+  <title>3D SDF Raymarching (Mobilfähig)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
-    body { margin: 0; overflow: hidden; background: black; }
-    canvas { display: block; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: black;
+      touch-action: none;
+    }
+    canvas {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -20,20 +29,19 @@
   </script>
 
   <script id="fragmentShader" type="x-shader/x-fragment">
-    precision highp float;
+    precision mediump float;
     varying vec2 vUv;
 
     uniform float iTime;
     uniform vec2 iResolution;
 
-    // Kugel-SDF
     float sphereSDF(vec3 p) {
       return length(p) - 1.0;
     }
 
     float raymarch(vec3 ro, vec3 rd) {
       float t = 0.0;
-      for (int i = 0; i < 100; i++) {
+      for (int i = 0; i < 64; i++) {
         vec3 p = ro + rd * t;
         float d = sphereSDF(p);
         if (d < 0.001) return t;
@@ -64,9 +72,9 @@
       if (t < 20.0) {
         vec3 hit = camPos + rd * t;
         float shade = dot(normalize(hit), vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
-        col = vec3(shade, 0.4 * shade, 1.0 - shade);
+        col = vec3(shade, 0.5 * shade, 1.0 - shade);
       } else {
-        col = vec3(0.0, 0.0, 0.0);
+        col = vec3(0.05, 0.05, 0.07);
       }
 
       gl_FragColor = vec4(col, 1.0);
@@ -76,36 +84,41 @@
   <script>
     const scene = new THREE.Scene();
     const camera = new THREE.Camera();
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     document.body.appendChild(renderer.domElement);
 
     const uniforms = {
       iTime: { value: 0 },
-      iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      iResolution: { value: new THREE.Vector2() },
     };
 
     const material = new THREE.ShaderMaterial({
       uniforms,
       vertexShader: document.getElementById('vertexShader').textContent,
-      fragmentShader: document.getElementById('fragmentShader').textContent
+      fragmentShader: document.getElementById('fragmentShader').textContent,
     });
 
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
     scene.add(quad);
+
+    function resize() {
+      const dpr = window.devicePixelRatio || 1;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      renderer.setSize(w, h, false);
+      renderer.setPixelRatio(dpr);
+      uniforms.iResolution.value.set(w * dpr, h * dpr);
+    }
+
+    window.addEventListener('resize', resize);
+    resize();
 
     function animate(time) {
       uniforms.iTime.value = time * 0.001;
       renderer.render(scene, camera);
       requestAnimationFrame(animate);
     }
-
     animate();
-
-    window.addEventListener('resize', () => {
-      uniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
   </script>
 </body>
 </html>
