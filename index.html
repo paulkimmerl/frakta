@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>3D SDF Fractal – Mandelbulb</title>
+  <meta charset="UTF-8">
+  <title>Raymarching SDF – Kugel</title>
   <style>
     body { margin: 0; overflow: hidden; background: black; }
     canvas { display: block; }
@@ -11,7 +11,6 @@
 <body>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js"></script>
 
-  <!-- Vertex Shader -->
   <script id="vertexShader" type="x-shader/x-vertex">
     varying vec2 vUv;
     void main() {
@@ -20,7 +19,6 @@
     }
   </script>
 
-  <!-- Fragment Shader -->
   <script id="fragmentShader" type="x-shader/x-fragment">
     precision highp float;
     varying vec2 vUv;
@@ -28,32 +26,21 @@
     uniform float iTime;
     uniform vec2 iResolution;
 
-    float mandelbulb(vec3 pos) {
-      vec3 z = pos;
-      float dr = 1.0;
-      float r = 0.0;
+    // Kugel-SDF
+    float sphereSDF(vec3 p) {
+      return length(p) - 1.0;
+    }
 
-      for (int i = 0; i < 8; i++) {
-        r = length(z);
-        if (r > 2.0) break;
-
-        float theta = acos(z.z / r);
-        float phi = atan(z.y, z.x);
-        float power = 8.0;
-        float zr = pow(r, power);
-        theta *= power;
-        phi *= power;
-
-        z = zr * vec3(
-          sin(theta) * cos(phi),
-          sin(theta) * sin(phi),
-          cos(theta)
-        ) + pos;
-
-        dr = pow(r, power - 1.0) * power * dr + 1.0;
+    float raymarch(vec3 ro, vec3 rd) {
+      float t = 0.0;
+      for (int i = 0; i < 100; i++) {
+        vec3 p = ro + rd * t;
+        float d = sphereSDF(p);
+        if (d < 0.001) return t;
+        if (t > 20.0) break;
+        t += d;
       }
-
-      return 0.5 * log(r) * r / dr;
+      return t;
     }
 
     vec3 getRayDir(vec2 uv, vec3 camPos, vec3 target, float zoom) {
@@ -63,41 +50,29 @@
       return normalize(r * uv.x + u * uv.y + f * zoom);
     }
 
-    float raymarch(vec3 ro, vec3 rd) {
-      float t = 0.0;
-      for (int i = 0; i < 128; i++) {
-        vec3 p = ro + rd * t;
-        float d = mandelbulb(p);
-        if (d < 0.001 || t > 100.0) break;
-        t += d;
-      }
-      return t;
-    }
-
     void main() {
       vec2 uv = (vUv - 0.5) * 2.0;
       uv.x *= iResolution.x / iResolution.y;
 
-      vec3 camPos = vec3(3.0 * sin(iTime * 0.3), 1.5, 3.0 * cos(iTime * 0.3));
+      vec3 camPos = vec3(0.0, 0.0, 3.0);
       vec3 target = vec3(0.0);
-      vec3 rd = getRayDir(uv, camPos, target, 1.5);
+      vec3 rd = getRayDir(uv, camPos, target, 1.0);
 
       float t = raymarch(camPos, rd);
-      vec3 col = vec3(0.0);
+      vec3 col;
 
-      if (t < 100.0) {
+      if (t < 20.0) {
         vec3 hit = camPos + rd * t;
         float shade = dot(normalize(hit), vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
-        col = vec3(shade, shade * 0.6, 1.0 - shade); // hübsche Farben
+        col = vec3(shade, 0.4 * shade, 1.0 - shade);
       } else {
-        col = vec3(0.02, 0.02, 0.05); // Hintergrund
+        col = vec3(0.0, 0.0, 0.0);
       }
 
       gl_FragColor = vec4(col, 1.0);
     }
   </script>
 
-  <!-- Three.js App -->
   <script>
     const scene = new THREE.Scene();
     const camera = new THREE.Camera();
@@ -111,14 +86,13 @@
     };
 
     const material = new THREE.ShaderMaterial({
-      uniforms: uniforms,
+      uniforms,
       vertexShader: document.getElementById('vertexShader').textContent,
       fragmentShader: document.getElementById('fragmentShader').textContent
     });
 
-    const geometry = new THREE.PlaneGeometry(2, 2);
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+    scene.add(quad);
 
     function animate(time) {
       uniforms.iTime.value = time * 0.001;
