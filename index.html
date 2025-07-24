@@ -2,46 +2,35 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>Langsames Mandelbulb Morphing in SW</title>
+  <title>Mandelbulb – Graustufen & viele Lichtquellen</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
+      margin: 0; padding: 0; overflow: hidden;
       background: black;
-      height: 100%;
-      width: 100%;
-      user-select: none;
-      touch-action: none;
-      cursor: grab;
+      width: 100vw; height: 100vh;
+      touch-action: none; cursor: grab;
     }
-    canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
-    }
-    body:active {
-      cursor: grabbing;
-    }
+    body:active { cursor: grabbing; }
+    canvas { width: 100vw; height: 100vh; display: block; }
   </style>
 </head>
 <body>
 <canvas id="glcanvas"></canvas>
 <script>
-const canvas = document.getElementById('glcanvas');
-const gl = canvas.getContext('webgl');
+const canvas = document.getElementById("glcanvas");
+const gl = canvas.getContext("webgl");
 if (!gl) alert("WebGL nicht verfügbar");
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-window.addEventListener('resize', () => {
+function resize() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-  gl.viewport(0, 0, canvas.width, canvas.height);
-});
+  gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+}
+window.addEventListener("resize", resize);
+resize();
 
+// Shader Sources
 const vs = `
 attribute vec3 position;
 void main() {
@@ -60,9 +49,9 @@ float mandelbulbDE(vec3 pos) {
   vec3 z = pos;
   float dr = 1.0;
   float r = 0.0;
-  float power = 8.0 + 0.4 * sin(time * 0.05);  // langsames Morphing
-
-  for (int i = 0; i < 8; i++) {
+  const int ITER = 8;
+  float power = 8.0 + 0.4 * sin(time * 0.1);  // animiertes Morphing
+  for(int i = 0; i < ITER; i++) {
     r = length(z);
     if (r > 2.0) break;
 
@@ -74,13 +63,9 @@ float mandelbulbDE(vec3 pos) {
     theta *= power;
     phi *= power;
 
-    z = zr * vec3(
-      sin(theta) * cos(phi),
-      sin(theta) * sin(phi),
-      cos(theta)
-    ) + pos;
+    z = zr * vec3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta)) + pos;
   }
-  return 0.45 * log(r) * r / dr;  // reduziert Artefakte
+  return 0.45 * log(r) * r / dr; // etwas weicher
 }
 
 vec3 getNormal(vec3 p) {
@@ -110,40 +95,40 @@ void main() {
   uv.x *= resolution.x / resolution.y;
 
   vec3 forward = normalize(camTarget - camPos);
-  vec3 right = normalize(cross(vec3(0.0,1.0,0.0), forward));
+  vec3 right = normalize(cross(vec3(0,1,0), forward));
   vec3 up = cross(forward, right);
-  vec3 rd = normalize(uv.x * right + uv.y * up + forward);
   vec3 ro = camPos;
+  vec3 rd = normalize(uv.x * right + uv.y * up + forward);
 
   float dist = raymarch(ro, rd);
   vec3 col = vec3(0.0);
 
   if(dist > 0.0) {
-    vec3 pos = ro + rd * dist;
-    vec3 normal = getNormal(pos);
+    vec3 p = ro + rd * dist;
+    vec3 normal = getNormal(p);
 
-    vec3 lightDir1 = normalize(vec3(
-      sin(time * 0.3),
-      cos(time * 0.4),
-      sin(time * 0.2)
-    ));
-    vec3 lightDir2 = normalize(vec3(
-      cos(time * 0.1),
-      sin(time * 0.15),
-      cos(time * 0.1 + 1.0)
-    ));
+    // 5 animierte Lichtquellen
+    vec3 lights[5];
+    lights[0] = normalize(vec3(sin(time*0.2), cos(time*0.3), sin(time*0.4)));
+    lights[1] = normalize(vec3(cos(time*0.1), sin(time*0.2), cos(time*0.15)));
+    lights[2] = normalize(vec3(sin(time*0.12 + 1.0), cos(time*0.1), sin(time*0.14)));
+    lights[3] = normalize(vec3(sin(time*0.05), 1.0, cos(time*0.05))); // heller
+    lights[4] = normalize(vec3(1.0, sin(time*0.3), cos(time*0.25)));
 
-    float diff1 = max(dot(normal, lightDir1), 0.0);
-    float diff2 = max(dot(normal, lightDir2), 0.0);
-    float brightness = 0.25 + 0.75 * abs(sin(time * 0.05));
+    float diff = 0.0;
+    for(int i = 0; i < 5; i++) {
+      float brightness = (i == 3) ? 2.0 : 0.6;
+      diff += brightness * max(dot(normal, lights[i]), 0.0);
+    }
 
-    col = vec3((diff1 + 0.5 * diff2) * brightness);
+    col = vec3(diff * 0.3); // Graustufen
   }
 
   gl_FragColor = vec4(col, 1.0);
 }
 `;
 
+// Compile Shaders
 function compile(type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
@@ -152,43 +137,46 @@ function compile(type, source) {
     console.error(gl.getShaderInfoLog(shader));
   return shader;
 }
+const vsShader = compile(gl.VERTEX_SHADER, vs);
+const fsShader = compile(gl.FRAGMENT_SHADER, fs);
 
+// Create Program
 const prog = gl.createProgram();
-gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs));
-gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+gl.attachShader(prog, vsShader);
+gl.attachShader(prog, fsShader);
 gl.linkProgram(prog);
 gl.useProgram(prog);
 
-const buf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+// Geometry
+const positionBuffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -1,-1,0, 1,-1,0, -1,1,0,
-  -1,1,0, 1,-1,0, 1,1,0
+  -1, -1, 0,  1, -1, 0,  -1, 1, 0,
+  -1, 1, 0,   1, -1, 0,   1, 1, 0,
 ]), gl.STATIC_DRAW);
+const posLoc = gl.getAttribLocation(prog, "position");
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
-const loc = gl.getAttribLocation(prog, 'position');
-gl.enableVertexAttribArray(loc);
-gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+// Uniforms
+const uRes = gl.getUniformLocation(prog, "resolution");
+const uCamPos = gl.getUniformLocation(prog, "camPos");
+const uCamTarget = gl.getUniformLocation(prog, "camTarget");
+const uTime = gl.getUniformLocation(prog, "time");
 
-const resLoc = gl.getUniformLocation(prog, 'resolution');
-const camPosLoc = gl.getUniformLocation(prog, 'camPos');
-const camTargetLoc = gl.getUniformLocation(prog, 'camTarget');
-const timeLoc = gl.getUniformLocation(prog, 'time');
-
-// Orbit-Kamera
+// Orbit control
 let azimuth = 0;
-let elevation = 0.4;
-let radius = 3.5;
-let isDragging = false, lastX, lastY;
-let azVel = 0;
+let elevation = 0.5;
+const radius = 3.5;
+let dragging = false;
+let lastX, lastY;
 
-canvas.addEventListener('mousedown', e => {
-  isDragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
+canvas.addEventListener("mousedown", e => {
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
 });
-canvas.addEventListener('mousemove', e => {
-  if (!isDragging) return;
+window.addEventListener("mouseup", () => dragging = false);
+window.addEventListener("mousemove", e => {
+  if (!dragging) return;
   let dx = e.clientX - lastX;
   let dy = e.clientY - lastY;
   azimuth += dx * 0.005;
@@ -197,74 +185,46 @@ canvas.addEventListener('mousemove', e => {
   lastX = e.clientX;
   lastY = e.clientY;
 });
-window.addEventListener('mouseup', () => { isDragging = false; });
 
-canvas.addEventListener('touchstart', e => {
+// Touch
+canvas.addEventListener("touchstart", e => {
   if (e.touches.length == 1) {
-    isDragging = true;
+    e.preventDefault();
+    dragging = true;
     lastX = e.touches[0].clientX;
     lastY = e.touches[0].clientY;
   }
-});
-canvas.addEventListener('touchmove', e => {
-  if (e.touches.length == 1) {
-    let x = e.touches[0].clientX;
-    let y = e.touches[0].clientY;
-    let dx = x - lastX;
-    let dy = y - lastY;
+}, {passive: false});
+canvas.addEventListener("touchmove", e => {
+  if (e.touches.length == 1 && dragging) {
+    e.preventDefault();
+    let dx = e.touches[0].clientX - lastX;
+    let dy = e.touches[0].clientY - lastY;
     azimuth += dx * 0.005;
     elevation += dy * 0.005;
     elevation = Math.max(0.1, Math.min(Math.PI/2 - 0.1, elevation));
-    lastX = x;
-    lastY = y;
+    lastX = e.touches[0].clientX;
+    lastY = e.touches[0].clientY;
   }
-}, {passive:false});
-canvas.addEventListener('touchend', () => { isDragging = false; });
+}, {passive: false});
+window.addEventListener("touchend", () => dragging = false);
 
-// Zoom per Rad und Pinch
-window.addEventListener('wheel', e => {
-  radius += e.deltaY * 0.01;
-  radius = Math.max(1.5, Math.min(10.0, radius));
-});
-
-let lastTouchDist = null;
-canvas.addEventListener('touchmove', e => {
-  if (e.touches.length == 2) {
-    e.preventDefault();
-    let dx = e.touches[0].clientX - e.touches[1].clientX;
-    let dy = e.touches[0].clientY - e.touches[1].clientY;
-    let dist = Math.hypot(dx, dy);
-    if (lastTouchDist) {
-      radius -= (dist - lastTouchDist) * 0.01;
-      radius = Math.max(1.5, Math.min(10.0, radius));
-    }
-    lastTouchDist = dist;
-  }
-}, {passive:false});
-canvas.addEventListener('touchend', () => {
-  lastTouchDist = null;
-});
-
+// Render
 function getCamPos(t) {
-  if (!isDragging) azimuth += 0.001; // langsame Autorotation
+  let az = dragging ? azimuth : azimuth + t * 0.0001;
   return [
-    radius * Math.sin(azimuth) * Math.cos(elevation),
+    radius * Math.sin(az) * Math.cos(elevation),
     radius * Math.sin(elevation),
-    radius * Math.cos(azimuth) * Math.cos(elevation)
+    radius * Math.cos(az) * Math.cos(elevation)
   ];
 }
 
-function render(t) {
-  t *= 0.001;
-  gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.uniform2f(resLoc, canvas.width, canvas.height);
-  gl.uniform1f(timeLoc, t);
-
-  const camPos = getCamPos(t);
-  gl.uniform3fv(camPosLoc, camPos);
-  gl.uniform3f(camTargetLoc, 0, 0, 0);
-
+function render(time) {
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform1f(uTime, time * 0.001);
+  const cam = getCamPos(time);
+  gl.uniform3fv(uCamPos, cam);
+  gl.uniform3f(uCamTarget, 0, 0, 0);
   gl.drawArrays(gl.TRIANGLES, 0, 6);
   requestAnimationFrame(render);
 }
