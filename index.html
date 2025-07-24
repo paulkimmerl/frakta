@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>3D Mandelbulb Fraktal – Weiche Bewegung</title>
+  <title>3D Mandelbulb Fraktal SW</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
@@ -48,20 +48,18 @@ const fragmentShaderSource = `
   uniform float time;
 
   float mandelbulbDE(vec3 pos) {
-    // Rotation um Y und Z für sanfte Bewegung
-    float angleY = time * 0.02;
-    float angleZ = time * 0.015;
+    float angleY = time * 0.005;
+    float angleZ = time * 0.003;
     float sy = sin(angleY), cy = cos(angleY);
     float sz = sin(angleZ), cz = cos(angleZ);
 
-    // Y-Rotation
+    // Rotation Y
     pos = vec3(
       cy * pos.x - sy * pos.z,
       pos.y,
       sy * pos.x + cy * pos.z
     );
-
-    // Z-Rotation
+    // Rotation Z
     pos = vec3(
       cz * pos.x - sz * pos.y,
       sz * pos.x + cz * pos.y,
@@ -71,21 +69,21 @@ const fragmentShaderSource = `
     vec3 z = pos;
     float dr = 1.0;
     float r = 0.0;
-    const int ITER = 10;
-    float power = 8.0; // Konstant, um Kanten zu vermeiden
-    vec3 offset = 0.2 * vec3(
-      sin(time * 0.05),
-      cos(time * 0.03),
-      sin(time * 0.04)
+    const int ITER = 12;
+    float power = 8.0;
+    vec3 offset = 0.7 * vec3(
+      sin(time * 0.01),
+      cos(time * 0.008),
+      sin(time * 0.012)
     );
 
-    for (int i = 0; i < ITER; i++) {
+    for(int i = 0; i < ITER; i++) {
       r = length(z);
       if (r > 2.0) break;
       float theta = acos(z.z / r);
       float phi = atan(z.y, z.x);
       dr =  pow(r, power - 1.0) * power * dr + 1.0;
-      float zr = r * r * r; // statt pow(r, power): weicher
+      float zr = r * r * r;
       theta *= power;
       phi *= power;
       z = zr * vec3(
@@ -94,7 +92,6 @@ const fragmentShaderSource = `
         cos(theta)
       ) + pos + offset;
     }
-
     return 0.5 * log(r) * r / dr;
   }
 
@@ -102,9 +99,9 @@ const fragmentShaderSource = `
     float eps = 0.001;
     float d = mandelbulbDE(p);
     return normalize(vec3(
-      mandelbulbDE(p + vec3(eps, 0, 0)) - d,
-      mandelbulbDE(p + vec3(0, eps, 0)) - d,
-      mandelbulbDE(p + vec3(0, 0, eps)) - d
+      mandelbulbDE(p + vec3(eps,0,0)) - d,
+      mandelbulbDE(p + vec3(0,eps,0)) - d,
+      mandelbulbDE(p + vec3(0,0,eps)) - d
     ));
   }
 
@@ -133,34 +130,17 @@ const fragmentShaderSource = `
 
     float dist = raymarch(ro, rd);
     vec3 col = vec3(0.0);
-
     if(dist > 0.0) {
       vec3 pos = ro + rd * dist;
       vec3 normal = getNormal(pos);
-
-      // 3 sanft wandernde Lichtquellen
-      vec3 light1 = normalize(vec3(
+      vec3 lightDir = normalize(vec3(
         sin(time * 0.1),
-        cos(time * 0.13),
-        sin(time * 0.11)
+        cos(time * 0.12),
+        sin(time * 0.07)
       ));
-      vec3 light2 = normalize(vec3(
-        cos(time * 0.07),
-        sin(time * 0.09),
-        cos(time * 0.05)
-      ));
-      vec3 light3 = normalize(vec3(
-        sin(time * 0.04 + 1.0),
-        cos(time * 0.06 + 2.0),
-        sin(time * 0.03 + 3.0)
-      ));
-
-      float diff1 = clamp(dot(normal, light1), 0.0, 1.0);
-      float diff2 = clamp(dot(normal, light2), 0.0, 1.0);
-      float diff3 = clamp(dot(normal, light3), 0.0, 1.0);
-
-      float brightness = 0.3 + 0.5 * abs(sin(time * 0.1)); // weicher Puls
-      col = vec3((diff1 + diff2 + diff3) / 3.0 * brightness);
+      float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
+      float brightness = 0.3 + 0.7 * abs(sin(time * 0.02));
+      col = vec3(diff * brightness);
     }
 
     gl_FragColor = vec4(col, 1.0);
@@ -201,7 +181,6 @@ gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
-// Kamera & Steuerung
 let azimuth = 0;
 let elevation = 0.4;
 let radius = 3.5;
