@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mandelbulb Morph</title>
+  <title>Mandelbulb Fraktal</title>
   <style>
     html, body {
       margin: 0;
-      height: 100%;
+      padding: 0;
+      overflow: hidden;
       background: black;
     }
     canvas {
+      display: block;
       width: 100%;
       height: 100%;
-      display: block;
     }
   </style>
 </head>
@@ -21,119 +22,88 @@
 <canvas id="glcanvas"></canvas>
 <script type="module">
 import * as THREE from "https://cdn.skypack.dev/three@0.158.0";
-import { OrbitControls } from "https://cdn.skypack.dev/three@0.158.0/examples/jsm/controls/OrbitControls.js";
 
-const scene = new THREE.Scene();
-const camera = new THREE.Camera();
 const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("glcanvas") });
 renderer.setSize(window.innerWidth, window.innerHeight);
-window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
 
-// Quad + Shader
+const camera = new THREE.Camera();
+const scene = new THREE.Scene();
+
 const geometry = new THREE.PlaneGeometry(2, 2);
 
 const material = new THREE.ShaderMaterial({
   uniforms: {
-    iTime: { value: 0 },
+    iTime: { value: 0.0 },
     iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-    camPos: { value: new THREE.Vector3(0, 0, 4) },
-    target: { value: new THREE.Vector3(0, 0, 0) }
   },
   fragmentShader: `
     precision highp float;
     uniform vec2 iResolution;
     uniform float iTime;
-    uniform vec3 camPos;
-    uniform vec3 target;
 
-    float DE(vec3 z, float power) {
-      vec3 w = z;
-      float m = dot(w,w);
-      float dz = 1.0;
-      for (int i = 0; i < 8; i++) {
-        float r = length(w);
-        float theta = acos(w.z / r);
-        float phi = atan(w.y, w.x);
-        dz = pow(r, power - 1.0) * power * dz + 1.0;
+    float mandelbulb(vec3 pos) {
+      vec3 z = pos;
+      float dr = 1.0;
+      float r = 0.0;
+      const int ITER = 10;
+      float power = 8.0;
+      for(int i = 0; i < ITER; i++) {
+        r = length(z);
+        if(r > 2.0) break;
+        float theta = acos(z.z/r);
+        float phi = atan(z.y, z.x);
+        dr = pow(r, power-1.0)*power*dr + 1.0;
         float zr = pow(r, power);
         theta *= power;
         phi *= power;
-        w = zr * vec3(
+        z = zr * vec3(
           sin(theta)*cos(phi),
           sin(theta)*sin(phi),
           cos(theta)
-        ) + z;
-        if (dot(w,w) > 256.0) break;
+        ) + pos;
       }
-      return 0.5*log(length(w))*length(w)/dz;
-    }
-
-    vec3 getNormal(vec3 p, float power) {
-      float e = 0.001;
-      vec2 h = vec2(e,0);
-      return normalize(vec3(
-        DE(p + h.xyy, power) - DE(p - h.xyy, power),
-        DE(p + h.yxy, power) - DE(p - h.yxy, power),
-        DE(p + h.yyx, power) - DE(p - h.yyx, power)
-      ));
+      return 0.5*log(r)*r/dr;
     }
 
     void main() {
       vec2 uv = (gl_FragCoord.xy / iResolution.xy) * 2.0 - 1.0;
       uv.x *= iResolution.x / iResolution.y;
 
-      // Camera ray
-      vec3 f = normalize(target - camPos);
-      vec3 r = normalize(cross(vec3(0,1,0), f));
-      vec3 u = cross(f, r);
-      vec3 rd = normalize(uv.x*r + uv.y*u + 1.5*f);
-      vec3 ro = camPos;
-
-      // Animate power between 6.0 and 9.0
-      float power = 6.0 + sin(iTime * 0.5) * 3.0;
+      vec3 camPos = vec3(4.0 * sin(iTime * 0.2), 2.0, 4.0 * cos(iTime * 0.2));
+      vec3 target = vec3(0.0);
+      vec3 forward = normalize(target - camPos);
+      vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
+      vec3 up = cross(forward, right);
+      vec3 rayDir = normalize(uv.x * right + uv.y * up + forward);
+      vec3 rayPos = camPos;
 
       float t = 0.0;
       float d;
-      for (int i = 0; i < 100; i++) {
-        vec3 p = ro + rd * t;
-        d = DE(p, power);
-        if (d < 0.001 || t > 20.0) break;
+      for(int i = 0; i < 100; i++) {
+        vec3 p = rayPos + rayDir * t;
+        d = mandelbulb(p);
+        if(d < 0.001 || t > 20.0) break;
         t += d;
       }
 
-      float shade = 0.0;
+      float col = 0.0;
       if (d < 0.01) {
-        vec3 p = ro + rd * t;
-        vec3 n = getNormal(p, power);
-        shade = dot(n, normalize(vec3(1,1,1))) * 0.5 + 0.5;
+        col = 1.0 - t / 10.0;
       }
 
-      gl_FragColor = vec4(vec3(shade), 1.0);
+      gl_FragColor = vec4(vec3(col), 1.0);
     }
   `,
+  depthTest: false,
 });
 
 const quad = new THREE.Mesh(geometry, material);
 scene.add(quad);
 
-let time = 0;
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableZoom = false;
-
-function animate() {
-  requestAnimationFrame(animate);
-  time += 0.016;
-  controls.update();
-
-  const pos = new THREE.Vector3();
-  controls.object.getWorldPosition(pos);
-  material.uniforms.camPos.value.copy(pos);
-  material.uniforms.target.value.set(0, 0, 0);
-  material.uniforms.iTime.value = time;
-
+function animate(time) {
+  material.uniforms.iTime.value = time * 0.001;
   renderer.render(scene, camera);
+  requestAnimationFrame(animate);
 }
 animate();
 </script>
