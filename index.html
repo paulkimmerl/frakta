@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8" />
-<title>Graustufen Mandelbulb mit Orbit-Control</title>
+<title>Animiertes morphendes Mandelbulb (Graustufen, AO, OrbitControl)</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   html, body {
@@ -53,13 +53,14 @@
     uniform vec2 resolution;
     uniform vec3 camPos;
     uniform vec3 camTarget;
+    uniform float time;
 
-    float mandelbulbDE(vec3 pos) {
+    // Mandelbulb DE mit dynamischem power (Morphing)
+    float mandelbulbDE(vec3 pos, float power) {
       vec3 z = pos;
       float dr = 1.0;
       float r = 0.0;
-      const int ITER = 8;
-      float power = 8.0;
+      const int ITER = 12;
       for(int i = 0; i < ITER; i++) {
         r = length(z);
         if (r > 2.0) break;
@@ -81,21 +82,36 @@
       return 0.5 * log(r) * r / dr;
     }
 
-    vec3 getNormal(vec3 p) {
+    // Normal Approximation
+    vec3 getNormal(vec3 p, float power) {
       float eps = 0.001;
-      float d = mandelbulbDE(p);
+      float d = mandelbulbDE(p, power);
       return normalize(vec3(
-        mandelbulbDE(p + vec3(eps, 0, 0)) - d,
-        mandelbulbDE(p + vec3(0, eps, 0)) - d,
-        mandelbulbDE(p + vec3(0, 0, eps)) - d
+        mandelbulbDE(p + vec3(eps, 0, 0), power) - d,
+        mandelbulbDE(p + vec3(0, eps, 0), power) - d,
+        mandelbulbDE(p + vec3(0, 0, eps), power) - d
       ));
     }
 
-    float raymarch(vec3 ro, vec3 rd) {
+    // Ambient Occlusion Approximation
+    float calcAO(vec3 p, vec3 n, float power) {
+      float ao = 0.0;
+      float sca = 1.0;
+      for(int i = 1; i <= 5; i++) {
+        float hr = float(i) * 0.02;
+        float d = mandelbulbDE(p + n * hr, power);
+        ao += (hr - d) * sca;
+        sca *= 0.7;
+      }
+      return clamp(1.0 - ao, 0.0, 1.0);
+    }
+
+    // Raymarching
+    float raymarch(vec3 ro, vec3 rd, float power) {
       float t = 0.0;
-      for(int i = 0; i < 100; i++) {
+      for(int i = 0; i < 150; i++) {
         vec3 p = ro + t * rd;
-        float dist = mandelbulbDE(p);
+        float dist = mandelbulbDE(p, power);
         if(dist < 0.001) return t;
         if(t > 20.0) break;
         t += dist;
@@ -114,17 +130,23 @@
       vec3 rd = normalize(uv.x * right + uv.y * up + forward);
       vec3 ro = camPos;
 
-      float dist = raymarch(ro, rd);
+      // Animierter Power-Wert morphend zwischen 6.0 und 10.0 mit Sinus (Langsam)
+      float power = 8.0 + 2.0 * sin(time * 0.5);
+
+      float dist = raymarch(ro, rd, power);
 
       vec3 col = vec3(0.0);
       if(dist > 0.0) {
         vec3 pos = ro + rd * dist;
-        vec3 normal = getNormal(pos);
+        vec3 normal = getNormal(pos, power);
         vec3 lightDir = normalize(vec3(0.0, 1.0, 1.0));
-        float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
 
-        // Graustufenfarbe basierend auf diff
-        col = vec3(diff);
+        float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
+        float ao = calcAO(pos, normal, power);
+
+        // Graustufen mit AO-Modulation, etwas Gamma-Korrektur (0.8)
+        float gray = pow(diff * ao, 0.8);
+        col = vec3(gray);
       }
 
       gl_FragColor = vec4(col, 1.0);
@@ -159,6 +181,7 @@
   const resolutionUniformLoc = gl.getUniformLocation(program, 'resolution');
   const camPosUniformLoc = gl.getUniformLocation(program, 'camPos');
   const camTargetUniformLoc = gl.getUniformLocation(program, 'camTarget');
+  const timeUniformLoc = gl.getUniformLocation(program, 'time');
 
   const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
@@ -254,18 +277,4 @@
   }
 
   function render(time=0) {
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    gl.uniform2f(resolutionUniformLoc, canvas.width, canvas.height);
-
-    const camPos = getCameraPosition(time);
-    gl.uniform3fv(camPosUniformLoc, camPos);
-    gl.uniform3f(camTargetUniformLoc, 0, 0, 0);
-
-    gl.drawArrays(gl.TRIANGLES, 0, 6);
-    requestAnimationFrame(render);
-  }
-  requestAnimationFrame(render);
-</script>
-</body>
-</html>
+    gl.clear(gl
