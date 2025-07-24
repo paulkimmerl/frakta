@@ -48,12 +48,28 @@ const fragmentShaderSource = `
   uniform float time;
 
   float mandelbulbDE(vec3 pos) {
+    float angle = time * 0.2;
+    float s = sin(angle);
+    float c = cos(angle);
+
+    // Rotation um Y-Achse
+    pos = vec3(
+      c * pos.x - s * pos.z,
+      pos.y,
+      s * pos.x + c * pos.z
+    );
+
     vec3 z = pos;
     float dr = 1.0;
     float r = 0.0;
-    const int ITER = 8;
-    float power = 8.0;
-    float offset = 0.5 * sin(time * 0.3);
+    const int ITER = 10;
+    float power = 7.0 + 1.5 * sin(time * 0.5); // dynamisches Power
+    vec3 offset = 0.3 * vec3(
+      sin(time * 0.7),
+      cos(time * 0.4),
+      sin(time * 0.3)
+    );
+
     for(int i = 0; i < ITER; i++) {
       r = length(z);
       if (r > 2.0) break;
