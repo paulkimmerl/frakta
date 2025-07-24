@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>3D SDF Fractal (Mandelbulb)</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r150/three.min.js"></script>
+  <script id="vertexShader" type="x-shader/x-vertex">
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = vec4(position, 1.0);
+    }
+  </script>
+
+  <script id="fragmentShader" type="x-shader/x-fragment">
+    precision highp float;
+    varying vec2 vUv;
+
+    uniform float iTime;
+    uniform vec2 iResolution;
+
+    // Mandelbulb Distance Estimator
+    float mandelbulb(vec3 pos) {
+      vec3 z = pos;
+      float dr = 1.0;
+      float r = 0.0;
+
+      for (int i = 0; i < 8; i++) {
+        r = length(z);
+        if (r > 2.0) break;
+
+        float theta = acos(z.z / r);
+        float phi = atan(z.y, z.x);
+        float power = 8.0;
+        float zr = pow(r, power);
+        theta *= power;
+        phi *= power;
+
+        z = zr * vec3(
+          sin(theta) * cos(phi),
+          sin(theta) * sin(phi),
+          cos(theta)
+        ) + pos;
+
+        dr = pow(r, power - 1.0) * power * dr + 1.0;
+      }
+
+      return 0.5 * log(r) * r / dr;
+    }
+
+    // Raymarching
+    vec3 getRayDir(vec2 uv, vec3 camPos, vec3 target, float zoom) {
+      vec3 f = normalize(target - camPos);
+      vec3 r = normalize(cross(vec3(0.0, 1.0, 0.0), f));
+      vec3 u = cross(f, r);
+      return normalize(r * uv.x + u * uv.y + f * zoom);
+    }
+
+    float raymarch(vec3 ro, vec3 rd) {
+      float t = 0.0;
+      for (int i = 0; i < 128; i++) {
+        vec3 p = ro + rd * t;
+        float d = mandelbulb(p);
+        if (d < 0.001 || t > 100.0) break;
+        t += d;
+      }
+      return t;
+    }
+
+    void main() {
+      vec2 uv = (vUv - 0.5) * 2.0;
+      uv.x *= iResolution.x / iResolution.y;
+
+      vec3 camPos = vec3(2.0 * sin(iTime * 0.2), 1.5, 2.0 * cos(iTime * 0.2));
+      vec3 target = vec3(0.0);
+      vec3 rd = getRayDir(uv, camPos, target, 1.5);
+
+      float t = raymarch(camPos, rd);
+      vec3 col = vec3(0.0);
+
+      if (t < 100.0) {
+        col = vec3(1.0 - t * 0.02, 0.4, 0.8);
+      }
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  </script>
+
+  <script>
+    const scene = new THREE.Scene();
+    const camera = new THREE.Camera();
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const uniforms = {
+      iTime: { value: 0 },
+      iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+    };
+
+    const material = new THREE.ShaderMaterial({
+      uniforms: uniforms,
+      vertexShader: document.getElementById('vertexShader').textContent,
+      fragmentShader: document.getElementById('fragmentShader').textContent
+    });
+
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    function animate(t) {
+      uniforms.iTime.value = t * 0.001;
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      uniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+</html>
