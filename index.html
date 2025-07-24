@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8" />
-<title>Raymarching Sphere Minimal</title>
+<title>Mandelbulb 3D Fraktal Raymarcher</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   html, body {
@@ -20,7 +20,6 @@
 <script>
   const canvas = document.getElementById('glcanvas');
 
-  // Canvas Größe auf Fenster setzen
   function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -36,7 +35,6 @@
     alert("WebGL wird nicht unterstützt");
   }
 
-  // Shader Quellen
   const vertexShaderSource = `
     attribute vec3 position;
     void main() {
@@ -47,18 +45,42 @@
   const fragmentShaderSource = `
     precision highp float;
     uniform vec2 resolution;
+    uniform float time;
 
-    // Distance function für Kugel
-    float sphereSDF(vec3 p, float r) {
-      return length(p) - r;
+    // Mandelbulb Distance Estimator
+    float mandelbulbDE(vec3 pos) {
+      vec3 z = pos;
+      float dr = 1.0;
+      float r = 0.0;
+      const int ITER = 8;
+      float power = 8.0;
+      for(int i = 0; i < ITER; i++) {
+        r = length(z);
+        if (r > 2.0) break;
+
+        // Spherical coordinates
+        float theta = acos(z.z / r);
+        float phi = atan(z.y, z.x);
+        dr =  pow(r, power - 1.0) * power * dr + 1.0;
+
+        float zr = pow(r, power);
+        theta = theta * power;
+        phi = phi * power;
+
+        z = zr * vec3(
+          sin(theta) * cos(phi),
+          sin(theta) * sin(phi),
+          cos(theta)
+        ) + pos;
+      }
+      return 0.5 * log(r) * r / dr;
     }
 
-    // Raymarching Funktion
     float raymarch(vec3 ro, vec3 rd) {
       float t = 0.0;
-      for(int i=0; i<64; i++) {
-        vec3 pos = ro + t * rd;
-        float dist = sphereSDF(pos, 1.0);
+      for(int i = 0; i < 100; i++) {
+        vec3 p = ro + t * rd;
+        float dist = mandelbulbDE(p);
         if(dist < 0.001) return t;
         if(t > 20.0) break;
         t += dist;
@@ -70,22 +92,44 @@
       vec2 uv = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
       uv.x *= resolution.x / resolution.y;
 
-      vec3 ro = vec3(0., 0., 3.);
-      vec3 rd = normalize(vec3(uv, -1.5));
+      // Kamera animiert rotierend
+      float angle = time * 0.3;
+      vec3 ro = vec3(2.5 * sin(angle), 1.5, 2.5 * cos(angle));
+      vec3 target = vec3(0.0);
+      vec3 forward = normalize(target - ro);
+      vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
+      vec3 up = cross(forward, right);
+
+      vec3 rd = normalize(uv.x * right + uv.y * up + forward);
 
       float dist = raymarch(ro, rd);
 
       vec3 col = vec3(0.0);
 
       if(dist > 0.0) {
-        col = vec3(1.0); // weiße Kugel
+        vec3 pos = ro + rd * dist;
+
+        // Einfache Beleuchtung
+        vec3 lightDir = normalize(vec3(0.0, 1.0, 1.0));
+        vec3 normal;
+        
+        // Normal Approximation (Gradient)
+        float eps = 0.001;
+        float d = mandelbulbDE(pos);
+        normal.x = mandelbulbDE(pos + vec3(eps, 0, 0)) - d;
+        normal.y = mandelbulbDE(pos + vec3(0, eps, 0)) - d;
+        normal.z = mandelbulbDE(pos + vec3(0, 0, eps)) - d;
+        normal = normalize(normal);
+
+        float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
+
+        col = vec3(0.8, 0.5, 1.0) * diff;
       }
 
       gl_FragColor = vec4(col, 1.0);
     }
   `;
 
-  // Shader bauen
   function compileShader(type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
@@ -110,11 +154,12 @@
 
   gl.useProgram(program);
 
-  // Attribute
   const posAttribLoc = gl.getAttribLocation(program, 'position');
+  const resolutionUniformLoc = gl.getUniformLocation(program, 'resolution');
+  const timeUniformLoc = gl.getUniformLocation(program, 'time');
+
   const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-  // Vollbild-Quad (2 Dreiecke)
   const positions = new Float32Array([
     -1, -1, 0,
      1, -1, 0,
@@ -128,23 +173,26 @@
   gl.enableVertexAttribArray(posAttribLoc);
   gl.vertexAttribPointer(posAttribLoc, 3, gl.FLOAT, false, 0, 0);
 
-  // Uniform
-  const resolutionUniformLoc = gl.getUniformLocation(program, 'resolution');
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
 
-  // Clear Color & Viewport
-  gl.clearColor(0, 0, 0, 1);
-  gl.viewport(0, 0, canvas.width, canvas.height);
-
-  function render() {
-    gl.clear(gl.COLOR_BUFFER_BIT);
+  function render(time = 0) {
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     gl.uniform2f(resolutionUniformLoc, canvas.width, canvas.height);
+    gl.uniform1f(timeUniformLoc, time * 0.001);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
     requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
+
 </script>
 </body>
 </html>
