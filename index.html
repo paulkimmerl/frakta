@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>Fraktal mit sanfter FBM & Orbit Controls</title>
+  <title>Fraktal mit sanfter FBM & Orbit Controls (Rotation only)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
@@ -10,6 +10,10 @@
     }
     canvas {
       display: block; width: 100vw; height: 100vh;
+      cursor: grab;
+    }
+    canvas:active {
+      cursor: grabbing;
     }
   </style>
 </head>
@@ -42,7 +46,7 @@ const fragmentShaderSource = `
   uniform vec3 camTarget;
   uniform float time;
 
-  // Hash and noise from previous code
+  // Hash and noise functions
   float hash(vec3 p) {
     p = fract(p * 0.3183099 + vec3(0.1));
     p *= 17.0;
@@ -62,12 +66,14 @@ const fragmentShaderSource = `
     return n;
   }
 
+  // Sanftere FBM mit weniger Oktaven, niedriger Frequenz
   float fbm(vec3 p) {
     float sum = 0.0;
-    float amp = 0.3;
-    for (int i = 0; i < 4; i++) {
-      sum += noise(p) * amp;
-      p *= 2.0;
+    float amp = 0.5;
+    float freq = 0.7;
+    for (int i = 0; i < 3; i++) {
+      sum += noise(p * freq) * amp;
+      freq *= 1.7;
       amp *= 0.5;
     }
     return sum;
@@ -95,9 +101,10 @@ const fragmentShaderSource = `
       ) + pos;
     }
     float baseDE = 0.5 * log(r) * r / dr;
-    // sanfte FBM Störung
-    float chaos = fbm(pos * 2.5 + time * 0.05);
-    return baseDE + chaos * 0.05;
+
+    // Sanfte FBM-Störung, langsamer animiert
+    float chaos = fbm(pos * 1.5 + vec3(time * 0.01));
+    return baseDE + chaos * 0.03;
   }
 
   vec3 getNormal(vec3 p) {
@@ -186,13 +193,12 @@ gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
-// --- Orbit Controls ---
+// Orbit Controls - Rotation only
 let azimuth = 0;
 let elevation = 0.4;
 let radius = 3.5;
 let isDragging = false;
 let lastX = 0, lastY = 0;
-let azimuthVel = 0;
 
 canvas.addEventListener("mousedown", e => {
   isDragging = true;
@@ -206,8 +212,8 @@ canvas.addEventListener("mousemove", e => {
     let dy = e.clientY - lastY;
     azimuth += dx * 0.005;
     elevation += dy * 0.005;
-    elevation = Math.min(Math.max(elevation, 0.05), Math.PI/2 - 0.05);
-    azimuthVel = dx * 0.001;
+    // Begrenze Elevation zwischen minimalem und maximalem Winkel (keine Überkopfdrehung)
+    elevation = Math.min(Math.max(elevation, 0.05), Math.PI / 2 - 0.05);
     lastX = e.clientX;
     lastY = e.clientY;
   }
@@ -217,6 +223,7 @@ window.addEventListener("mouseup", () => {
   isDragging = false;
 });
 
+// Zoom nur per Wheel, kein Pan
 window.addEventListener("wheel", e => {
   radius += e.deltaY * 0.01;
   radius = Math.min(Math.max(radius, 1.5), 10.0);
@@ -227,11 +234,7 @@ function render(time) {
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(timeLoc, time * 0.001);
 
-  if (!isDragging) {
-    azimuth += azimuthVel;
-    azimuthVel *= 0.95;
-  }
-
+  // Kameraposition aus sphärischen Koordinaten
   const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
   const camY = radius * Math.sin(elevation);
   const camZ = radius * Math.cos(azimuth) * Math.cos(elevation);
