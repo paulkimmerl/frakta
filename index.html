@@ -1,154 +1,206 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
-  <meta charset="UTF-8">
-  <title>Mandelbulb mit FBM</title>
+  <meta charset="UTF-8" />
+  <title>Mandelbulb mit FBM & Wrap-Animation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
+    html, body { margin: 0; padding: 0; overflow: hidden; background: black; }
+    canvas { display: block; width: 100vw; height: 100vh; }
   </style>
 </head>
 <body>
 <canvas id="glcanvas"></canvas>
-<script type="module">
-import * as THREE from 'https://cdn.skypack.dev/three@0.152.2';
-import { OrbitControls } from 'https://cdn.skypack.dev/three@0.152.2/examples/jsm/controls/OrbitControls.js';
+<script>
+// Setup
+const canvas = document.getElementById("glcanvas");
+const gl = canvas.getContext("webgl");
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+gl.viewport(0, 0, canvas.width, canvas.height);
 
-const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('glcanvas') });
-renderer.setSize(window.innerWidth, window.innerHeight);
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.z = 4;
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enablePan = false;
-controls.minDistance = 2;
-controls.maxDistance = 10;
-
-const uniforms = {
-  iTime: { value: 0.0 },
-  iResolution: { value: new THREE.Vector3(window.innerWidth, window.innerHeight, 1) }
-};
-
-const material = new THREE.ShaderMaterial({
-  uniforms,
-  fragmentShader: `
-
-#define MAX_STEPS 100
-#define MAX_DIST 100.
-#define SURF_DIST 0.001
-
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453123);
+// Shaders
+const vs = `
+attribute vec3 position;
+void main() {
+  gl_Position = vec4(position, 1.0);
 }
+`;
 
-float noise(vec3 x) {
-  vec3 p = floor(x);
-  vec3 f = fract(x);
+const fs = `precision highp float;
+uniform vec2 resolution;
+uniform vec3 camPos;
+uniform vec3 camTarget;
+uniform float time;
+
+// Noise & FBM
+float hash(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise(vec3 p){
+  vec3 i = floor(p);
+  vec3 f = fract(p);
   f = f*f*(3.0-2.0*f);
-  float n = p.x + p.y*57.0 + 113.0*p.z;
-  return mix(mix(mix(hash(vec2(n + 0.0, n + 1.0)),
-                     hash(vec2(n + 57.0, n + 58.0)), f.x),
-                 mix(hash(vec2(n + 113.0, n + 114.0)),
-                     hash(vec2(n + 170.0, n + 171.0)), f.x), f.y), f.z);
+  float n = mix(mix(mix(hash(i), hash(i+vec3(1,0,0)),f.x),
+                    mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)),f.x),f.y),
+                mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)),f.x),
+                    mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+  return n;
 }
-
 float fbm(vec3 p) {
-  float v = 0.0;
-  float a = 0.6;
-  for (int i = 0; i < 4; i++) {
-    v += a * noise(p);
+  float f = 0.0, a = 1.0;
+  for(int i = 0; i < 5; i++) {
+    f += a * noise(p);
     p *= 1.8;
     a *= 0.5;
   }
-  return v;
+  return f;
 }
 
-float mandelbulbDE(vec3 pos, float power, vec3 offset) {
+// Mandelbulb
+float mandelbulbDE(vec3 pos, vec3 offset) {
   vec3 z = pos;
   float dr = 1.0;
   float r = 0.0;
-  for (int i = 0; i < 8; i++) {
+  const float power = 8.0;
+  for(int i = 0; i < 8; i++) {
     r = length(z);
-    if (r > 4.0) break;
-
-    float theta = acos(z.z / r);
+    if(r > 2.0) break;
+    float theta = acos(z.z/r);
     float phi = atan(z.y, z.x);
-    dr = pow(r, power - 1.0) * power * dr + 1.0;
-
+    dr =  pow(r, power - 1.0)*power*dr + 1.0;
     float zr = pow(r, power);
     theta *= power;
     phi *= power;
-
-    z = zr * vec3(sin(theta) * cos(phi), sin(theta) * sin(phi), cos(theta));
-    z += pos + offset;
+    z = zr * vec3(sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)) + pos + offset;
   }
-  return 0.5 * log(r) * r / dr;
+  return 0.5*log(r)*r/dr;
 }
 
-float sceneDE(vec3 p, float t) {
-  vec3 anim = vec3(
-    sin(t * 0.1) * 0.3,
-    cos(t * 0.13) * 0.3,
-    sin(t * 0.07) * 0.3
-  );
-  float bulb = mandelbulbDE(p, 8.0, anim);
-  float chaos = 0.3 - fbm(p * 0.4 + anim);
-  return max(bulb, chaos); // weiche Intersect – FBM frisst das Fraktal
-}
-
-vec3 getNormal(vec3 p, float t) {
-  float h = 0.001;
-  vec2 k = vec2(1, -1);
-  return normalize(
-    k.xyy * sceneDE(p + k.xyy * h, t) +
-    k.yyx * sceneDE(p + k.yyx * h, t) +
-    k.yxy * sceneDE(p + k.yxy * h, t) +
-    k.xxx * sceneDE(p + k.xxx * h, t)
-  );
-}
-
-vec3 raymarch(vec3 ro, vec3 rd, float t) {
-  float dO = 0.0;
-  for (int i = 0; i < MAX_STEPS; i++) {
-    vec3 p = ro + dO * rd;
-    float dS = sceneDE(p, t);
-    if (dS < SURF_DIST) {
-      vec3 n = getNormal(p, t);
-      vec3 light = normalize(vec3(1.0, 0.6, -1.0));
-      float diff = max(dot(n, light), 0.0);
-      float spec = pow(max(dot(reflect(-light, n), -rd), 0.0), 16.0);
-      return vec3(0.3, 0.7, 1.0) * diff + vec3(1.0) * spec;
-    }
-    dO += dS;
-    if (dO > MAX_DIST) break;
+float raymarch(vec3 ro, vec3 rd, vec3 offset) {
+  float t = 0.0;
+  for(int i = 0; i < 100; i++) {
+    vec3 p = ro + rd * t;
+    float d = mandelbulbDE(p, offset);
+    if(d < 0.001) return t;
+    if(t > 20.0) break;
+    t += d;
   }
-  return vec3(0.0);
+  return -1.0;
+}
+
+vec3 getNormal(vec3 p, vec3 offset) {
+  float e = 0.001;
+  return normalize(vec3(
+    mandelbulbDE(p + vec3(e,0,0), offset) - mandelbulbDE(p, offset),
+    mandelbulbDE(p + vec3(0,e,0), offset) - mandelbulbDE(p, offset),
+    mandelbulbDE(p + vec3(0,0,e), offset) - mandelbulbDE(p, offset)
+  ));
 }
 
 void main() {
-  vec2 uv = (gl_FragCoord.xy / iResolution.xy) * 2.0 - 1.0;
-  uv.x *= iResolution.x / iResolution.y;
-  vec3 ro = vec3(0.0, 0.0, 4.0);
-  vec3 rd = normalize(vec3(uv, -1.5));
-  vec3 col = raymarch(ro, rd, iTime);
-  gl_FragColor = vec4(col, 1.0);
+  vec2 uv = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
+  uv.x *= resolution.x / resolution.y;
+
+  // Kamera
+  vec3 forward = normalize(camTarget - camPos);
+  vec3 right = normalize(cross(vec3(0,1,0), forward));
+  vec3 up = cross(forward, right);
+  vec3 ro = camPos;
+  vec3 rd = normalize(uv.x * right + uv.y * up + forward);
+
+  // Morph mit FBM & Wrap
+  vec3 wrap1 = 0.25 * vec3(
+    sin(time * 0.3),
+    sin(time * 0.21 + 2.0),
+    sin(time * 0.17 + 1.3)
+  );
+  vec3 fbmVec = vec3(fbm(ro * 0.4 + time * 0.05));
+  vec3 offset = wrap1 + 0.4 * fbmVec;
+
+  float dist = raymarch(ro, rd, offset);
+  vec3 color = vec3(0.0);
+
+  if(dist > 0.0) {
+    vec3 pos = ro + rd * dist;
+    vec3 normal = getNormal(pos, offset);
+    vec3 light = normalize(vec3(0.5, 0.6, 0.2));
+    float diff = max(dot(normal, light), 0.0);
+    color = mix(vec3(0.1,0.2,0.3), vec3(0.9,0.95,1.0), diff);
+  }
+
+  gl_FragColor = vec4(color, 1.0);
 }
-`
+`;
+
+// Compile
+function compile(type, source) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, source);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+// Attributes & Uniforms
+const posLoc = gl.getAttribLocation(prog, "position");
+const resLoc = gl.getUniformLocation(prog, "resolution");
+const camPosLoc = gl.getUniformLocation(prog, "camPos");
+const camTargetLoc = gl.getUniformLocation(prog, "camTarget");
+const timeLoc = gl.getUniformLocation(prog, "time");
+
+// Fullscreen Quad
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1,-1,0,  1,-1,0, -1,1,0,
+  -1,1,0,   1,-1,0,  1,1,0
+]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+// Kamera-Steuerung
+let azimuth = 0.4, elevation = 0.3, radius = 3.5;
+let isDragging = false, lastX, lastY;
+canvas.addEventListener("mousedown", e => {
+  isDragging = true; lastX = e.clientX; lastY = e.clientY;
+});
+canvas.addEventListener("mousemove", e => {
+  if (isDragging) {
+    let dx = e.clientX - lastX, dy = e.clientY - lastY;
+    azimuth += dx * 0.005;
+    elevation = Math.min(Math.max(0.05, elevation + dy * 0.005), Math.PI/2 - 0.05);
+    lastX = e.clientX; lastY = e.clientY;
+  }
+});
+window.addEventListener("mouseup", () => isDragging = false);
+window.addEventListener("wheel", e => {
+  radius += e.deltaY * 0.01;
+  radius = Math.max(1.5, Math.min(radius, 8.0));
 });
 
-const geometry = new THREE.PlaneGeometry(2, 2);
-const mesh = new THREE.Mesh(geometry, material);
-scene.add(mesh);
+// Animation
+function render(t) {
+  gl.uniform2f(resLoc, canvas.width, canvas.height);
+  gl.uniform1f(timeLoc, t * 0.001);
 
-function animate(t) {
-  uniforms.iTime.value = t * 0.001;
-  uniforms.iResolution.value.set(window.innerWidth, window.innerHeight, 1);
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.render(scene, camera);
-  requestAnimationFrame(animate);
+  const x = radius * Math.sin(azimuth) * Math.cos(elevation);
+  const y = radius * Math.sin(elevation);
+  const z = radius * Math.cos(azimuth) * Math.cos(elevation);
+  gl.uniform3f(camPosLoc, x, y, z);
+  gl.uniform3f(camTargetLoc, 0, 0, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  requestAnimationFrame(render);
 }
-animate();
+render(0);
 </script>
 </body>
 </html>
