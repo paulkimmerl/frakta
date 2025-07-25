@@ -2,21 +2,14 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>Fraktal mit sanfter FBM</title>
+  <title>Fraktal mit sanfter FBM & Orbit Controls</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
-      margin: 0;
-      padding: 0;
-      background: black;
-      overflow: hidden;
-      height: 100%;
-      width: 100%;
+      margin: 0; padding: 0; overflow: hidden; background: black; height: 100%; width: 100%;
     }
     canvas {
-      display: block;
-      width: 100vw;
-      height: 100vh;
+      display: block; width: 100vw; height: 100vh;
     }
   </style>
 </head>
@@ -27,9 +20,13 @@ const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl");
 if (!gl) alert("WebGL wird nicht unterstützt");
 
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-gl.viewport(0, 0, canvas.width, canvas.height);
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+resize();
+window.addEventListener('resize', resize);
 
 const vertexShaderSource = `
   attribute vec3 position;
@@ -45,8 +42,9 @@ const fragmentShaderSource = `
   uniform vec3 camTarget;
   uniform float time;
 
+  // Hash and noise from previous code
   float hash(vec3 p) {
-    p = fract(p * 0.3183099 + vec3(0.1,0.1,0.1));
+    p = fract(p * 0.3183099 + vec3(0.1));
     p *= 17.0;
     return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
   }
@@ -97,6 +95,7 @@ const fragmentShaderSource = `
       ) + pos;
     }
     float baseDE = 0.5 * log(r) * r / dr;
+    // sanfte FBM Störung
     float chaos = fbm(pos * 2.5 + time * 0.05);
     return baseDE + chaos * 0.05;
   }
@@ -181,38 +180,43 @@ const timeLoc = gl.getUniformLocation(program, "time");
 const buffer = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -1,-1,0,  1,-1,0,  -1,1,0,
-  -1,1,0,   1,-1,0,  1,1,0
+  -1,-1,0, 1,-1,0, -1,1,0,
+  -1,1,0, 1,-1,0, 1,1,0
 ]), gl.STATIC_DRAW);
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
-// Kamera
+// --- Orbit Controls ---
 let azimuth = 0;
 let elevation = 0.4;
 let radius = 3.5;
 let isDragging = false;
 let lastX = 0, lastY = 0;
-let azimuthVel = 0.0;
+let azimuthVel = 0;
 
 canvas.addEventListener("mousedown", e => {
   isDragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
 });
+
 canvas.addEventListener("mousemove", e => {
   if (isDragging) {
-    const dx = e.clientX - lastX;
-    const dy = e.clientY - lastY;
+    let dx = e.clientX - lastX;
+    let dy = e.clientY - lastY;
     azimuth += dx * 0.005;
     elevation += dy * 0.005;
-    elevation = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation));
+    elevation = Math.min(Math.max(elevation, 0.05), Math.PI/2 - 0.05);
     azimuthVel = dx * 0.001;
     lastX = e.clientX;
     lastY = e.clientY;
   }
 });
-window.addEventListener("mouseup", () => isDragging = false);
+
+window.addEventListener("mouseup", () => {
+  isDragging = false;
+});
+
 window.addEventListener("wheel", e => {
   radius += e.deltaY * 0.01;
   radius = Math.min(Math.max(radius, 1.5), 10.0);
@@ -225,12 +229,13 @@ function render(time) {
 
   if (!isDragging) {
     azimuth += azimuthVel;
-    azimuthVel *= 0.98;
+    azimuthVel *= 0.95;
   }
 
   const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
   const camY = radius * Math.sin(elevation);
   const camZ = radius * Math.cos(azimuth) * Math.cos(elevation);
+
   gl.uniform3f(camPosLoc, camX, camY, camZ);
   gl.uniform3f(camTargetLoc, 0, 0, 0);
 
