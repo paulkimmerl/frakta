@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>3D Mandelbulb Fraktal SW</title>
+  <title>3D Mandelbulb Fraktal mit wraps & FBM</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
@@ -38,16 +38,45 @@ const vertexShaderSource = `
   }
 `;
 
+// Simple 3D noise function from https://www.shadertoy.com/view/4dS3Wd
 const fragmentShaderSource = `
   precision highp float;
-
   uniform vec2 resolution;
   uniform vec3 camPos;
   uniform vec3 camTarget;
   uniform float time;
 
-  // Mandelbulb Distance Estimator mit zwei animierten Parametern
-  float mandelbulbDE(vec3 pos, float power, float offset) {
+  // Hash, noise & fbm for low freq / low amplitude
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+
+  float noise(vec3 p){
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f*f*(3.0-2.0*f);
+    float n = mix(mix(mix(hash(i), hash(i+vec3(1,0,0)),f.x),
+                      mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)),f.x),f.y),
+                  mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)),f.x),
+                      mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+    return n;
+  }
+
+  float fbm(vec3 p) {
+    float f = 0.0;
+    float amp = 0.5;
+    float freq = 0.3; // niedrigfrequenter FBM
+    for(int i = 0; i < 4; i++) {
+      f += amp * noise(p * freq);
+      freq *= 2.0;
+      amp *= 0.5;
+    }
+    return f;
+  }
+
+  float mandelbulbDE(vec3 pos, float power, float offsetX, float offsetY, float offsetZ) {
     vec3 z = pos;
     float dr = 1.0;
     float r = 0.0;
@@ -64,33 +93,32 @@ const fragmentShaderSource = `
       theta *= power;
       phi *= power;
 
-      // Animierte kleine Offset für Morphing
       vec3 newPos = zr * vec3(
         sin(theta)*cos(phi),
         sin(theta)*sin(phi),
         cos(theta)
-      ) + pos + vec3(offset * 0.5, offset * 0.3, offset * 0.7);
+      ) + pos + vec3(offsetX, offsetY, offsetZ);
 
       z = newPos;
     }
     return 0.5 * log(r) * r / dr;
   }
 
-  vec3 getNormal(vec3 p, float power, float offset) {
+  vec3 getNormal(vec3 p, float power, vec3 offset) {
     float eps = 0.001;
-    float d = mandelbulbDE(p, power, offset);
+    float d = mandelbulbDE(p, power, offset.x, offset.y, offset.z);
     return normalize(vec3(
-      mandelbulbDE(p + vec3(eps, 0, 0), power, offset) - d,
-      mandelbulbDE(p + vec3(0, eps, 0), power, offset) - d,
-      mandelbulbDE(p + vec3(0, 0, eps), power, offset) - d
+      mandelbulbDE(p + vec3(eps, 0, 0), power, offset.x, offset.y, offset.z) - d,
+      mandelbulbDE(p + vec3(0, eps, 0), power, offset.x, offset.y, offset.z) - d,
+      mandelbulbDE(p + vec3(0, 0, eps), power, offset.x, offset.y, offset.z) - d
     ));
   }
 
-  float raymarch(vec3 ro, vec3 rd, float power, float offset) {
+  float raymarch(vec3 ro, vec3 rd, float power, vec3 offset) {
     float t = 0.0;
     for(int i = 0; i < 100; i++) {
       vec3 p = ro + t * rd;
-      float dist = mandelbulbDE(p, power, offset);
+      float dist = mandelbulbDE(p, power, offset.x, offset.y, offset.z);
       if(dist < 0.001) return t;
       if(t > 20.0) break;
       t += dist;
@@ -102,7 +130,7 @@ const fragmentShaderSource = `
     vec2 uv = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
     uv.x *= resolution.x / resolution.y;
 
-    // Kamera-Basis
+    // Kamera Basis
     vec3 forward = normalize(camTarget - camPos);
     vec3 right = normalize(cross(vec3(0,1,0), forward));
     vec3 up = cross(forward, right);
@@ -110,9 +138,16 @@ const fragmentShaderSource = `
     vec3 rd = normalize(uv.x * right + uv.y * up + forward);
     vec3 ro = camPos;
 
-    // Animierte Parameter, langsam, unterschiedlich getaktet
-    float power = 7.0 + 0.3 * sin(time * 0.3);
-    float offset = 0.4 * sin(time * 0.2 + 3.14);
+    // Mehrere zeitversetzte Parameter "wraps" für natürliche Morphanimation:
+    float power = 7.0 + 0.4 * sin(time * 0.3);
+    float offsetX = 0.3 * sin(time * 0.2);
+    float offsetY = 0.3 * sin(time * 0.23 + 1.57);  // phasenverschoben
+    float offsetZ = 0.3 * sin(time * 0.25 + 3.14);  // phasenverschoben
+
+    // FBM (niedrige freq, kleine amp) als Rauschmaske, wird skaliert für offsets
+    float noiseVal = 0.05 * fbm(ro * 0.5 + time * 0.1);
+
+    vec3 offset = vec3(offsetX, offsetY, offsetZ) + noiseVal;
 
     float dist = raymarch(ro, rd, power, offset);
 
@@ -127,7 +162,7 @@ const fragmentShaderSource = `
         sin(time * 0.15)
       ));
       float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
-      float brightness = 0.3 + 0.7 * abs(sin(time * 0.5));
+      float brightness = 0.4 + 0.6 * abs(sin(time * 0.5));
       col = vec3(diff * brightness);
     }
 
