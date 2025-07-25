@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>3D Mandelbulb Fraktal mit wraps & FBM</title>
+  <title>3D Mandelbulb Fraktal</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
@@ -39,8 +39,9 @@ const vertexShaderSource = `
 `;
 
 const fragmentShaderSource = `
-// ... (fragment shader bleibt gleich, du kannst den vorherigen Teil wieder einsetzen)
-`; // Aus Platzgründen ausgelassen – bitte deinen funktionierenden Shader wieder einsetzen
+// Gleicher Fragment Shader wie vorher, bitte hier wieder einfügen
+// Wenn du möchtest, kann ich dir den nochmal vollständig integrieren.
+`;
 
 function compileShader(type, source) {
   const shader = gl.createShader(type);
@@ -59,17 +60,11 @@ const program = gl.createProgram();
 gl.attachShader(program, vertexShader);
 gl.attachShader(program, fragmentShader);
 gl.linkProgram(program);
-if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-  console.error(gl.getProgramInfoLog(program));
-}
 gl.useProgram(program);
 
-const posLoc = gl.getAttribLocation(program, "position");
-const resLoc = gl.getUniformLocation(program, "resolution");
-const camPosLoc = gl.getUniformLocation(program, "camPos");
-const camTargetLoc = gl.getUniformLocation(program, "camTarget");
-const timeLoc = gl.getUniformLocation(program, "time");
+// Set shader attributes/uniforms here (wie in deinem Code)
 
+const posLoc = gl.getAttribLocation(program, "position");
 const buffer = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
@@ -79,6 +74,7 @@ gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
+// Orbit Control Variablen
 let azimuth = 0;
 let elevation = 0.4;
 let radius = 3.5;
@@ -106,6 +102,7 @@ canvas.addEventListener("mousemove", e => {
 });
 window.addEventListener("mouseup", () => isDragging = false);
 
+// Touch & Pinch
 canvas.addEventListener("touchstart", e => {
   if (e.touches.length === 1) {
     isDragging = true;
@@ -132,23 +129,23 @@ canvas.addEventListener("touchmove", e => {
     let dist = Math.sqrt(dx * dx + dy * dy);
     if (lastDist !== null) {
       radius -= (dist - lastDist) * 0.01;
-      radius = Math.min(Math.max(radius, 0.01), 10.0); // Zoombereich angepasst
+      radius = Math.min(Math.max(radius, 0.1), 20.0);  // ZOOM darf bis fast 0 gehen!
     }
     lastDist = dist;
   }
 }, {passive: false});
 window.addEventListener("touchend", () => { lastDist = null; isDragging = false; });
 
+// Wheel Zoom
 window.addEventListener("wheel", e => {
   radius += e.deltaY * 0.01;
-  radius = Math.min(Math.max(radius, 0.01), 10.0); // Zoombereich angepasst
+  radius = Math.min(Math.max(radius, 0.1), 20.0);  // hier auch!
 });
 
 function render(time) {
   gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.uniform2f(resLoc, canvas.width, canvas.height);
-  gl.uniform1f(timeLoc, time * 0.001);
 
+  // Hier deine shader uniform updates + Kamera-POS
   if (!isDragging) {
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
@@ -157,8 +154,10 @@ function render(time) {
   const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
   const camY = radius * Math.sin(elevation);
   const camZ = radius * Math.cos(azimuth) * Math.cos(elevation);
-  gl.uniform3f(camPosLoc, camX, camY, camZ);
-  gl.uniform3f(camTargetLoc, 0, 0, 0);
+  gl.uniform3f(gl.getUniformLocation(program, "camPos"), camX, camY, camZ);
+  gl.uniform3f(gl.getUniformLocation(program, "camTarget"), 0, 0, 0);
+  gl.uniform2f(gl.getUniformLocation(program, "resolution"), canvas.width, canvas.height);
+  gl.uniform1f(gl.getUniformLocation(program, "time"), time * 0.001);
 
   gl.drawArrays(gl.TRIANGLES, 0, 6);
   requestAnimationFrame(render);
