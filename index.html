@@ -1,32 +1,36 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-<meta charset="UTF-8" />
-<title>Mandelbulb mit Power- und zTime-Animation + OrbitControls</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>
-  html, body, canvas {
-    margin: 0; padding: 0;
-    width: 100%; height: 100%;
-    display: block;
-    background: black;
-    user-select: none;
-    overflow: hidden;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <title>Mandelbulb mit Zoom bis 0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: black;
+      overflow: hidden;
+      height: 100%;
+      width: 100%;
+      touch-action: none;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
 </head>
 <body>
 <canvas id="glcanvas"></canvas>
 <script>
 const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl");
-if (!gl) alert("WebGL wird nicht unterstützt");
-
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 gl.viewport(0, 0, canvas.width, canvas.height);
 
-// Vertex-Shader (Standard Vollbild-Dreieck)
 const vertexShaderSource = `
   attribute vec3 position;
   void main() {
@@ -34,64 +38,76 @@ const vertexShaderSource = `
   }
 `;
 
-// Fragment-Shader mit Power-Animation und zusätzlicher zTime-Animation im Iterationsprozess
 const fragmentShaderSource = `
   precision highp float;
   uniform vec2 resolution;
   uniform vec3 camPos;
   uniform vec3 camTarget;
   uniform float time;
-  uniform float zTime;
 
-  // Mandelbulb Distance Estimator mit Power + zTime
-  float mandelbulbDE(vec3 pos, float power, float zTime) {
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+
+  float noise(vec3 p){
+    vec3 i = floor(p);
+    vec3 f = fract(p);
+    f = f*f*(3.0-2.0*f);
+    float n = mix(mix(mix(hash(i), hash(i+vec3(1,0,0)),f.x),
+                      mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)),f.x),f.y),
+                  mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)),f.x),
+                      mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+    return n;
+  }
+
+  float fbm(vec3 p) {
+    float f = 0.0;
+    float amp = 0.5;
+    float freq = 0.3;
+    for(int i = 0; i < 4; i++) {
+      f += amp * noise(p * freq);
+      freq *= 2.0;
+      amp *= 0.5;
+    }
+    return f;
+  }
+
+  float mandelbulbDE(vec3 pos, float power, vec3 offset) {
     vec3 z = pos;
     float dr = 1.0;
     float r = 0.0;
     const int ITER = 8;
-
     for(int i = 0; i < ITER; i++) {
       r = length(z);
-      if(r > 2.0) break;
-
-      // Winkel
+      if (r > 2.0) break;
       float theta = acos(z.z / r);
       float phi = atan(z.y, z.x);
-
-      // Zeitliche Modulation: kleine Verzerrung der Winkel abhängig von zTime und Iterationsschritt i
-      theta += 0.3 * sin(zTime + float(i) * 1.7);
-      phi += 0.3 * cos(zTime * 1.1 + float(i) * 2.3);
-
       dr = pow(r, power - 1.0) * power * dr + 1.0;
       float zr = pow(r, power);
-
-      // Neue Position mit zeitlich veränderter Winkel und Radius
-      z = zr * vec3(
-        sin(theta) * cos(phi),
-        sin(theta) * sin(phi),
-        cos(theta)
-      ) + pos;
+      theta *= power;
+      phi *= power;
+      z = zr * vec3(sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)) + pos + offset;
     }
     return 0.5 * log(r) * r / dr;
   }
 
-  // Normalberechnung per Finitedifferenzen
-  vec3 getNormal(vec3 p, float power, float zTime) {
+  vec3 getNormal(vec3 p, float power, vec3 offset) {
     float eps = 0.001;
-    float d = mandelbulbDE(p, power, zTime);
+    float d = mandelbulbDE(p, power, offset);
     return normalize(vec3(
-      mandelbulbDE(p + vec3(eps,0,0), power, zTime) - d,
-      mandelbulbDE(p + vec3(0,eps,0), power, zTime) - d,
-      mandelbulbDE(p + vec3(0,0,eps), power, zTime) - d
+      mandelbulbDE(p + vec3(eps, 0, 0), power, offset) - d,
+      mandelbulbDE(p + vec3(0, eps, 0), power, offset) - d,
+      mandelbulbDE(p + vec3(0, 0, eps), power, offset) - d
     ));
   }
 
-  // Raymarching
-  float raymarch(vec3 ro, vec3 rd, float power, float zTime) {
+  float raymarch(vec3 ro, vec3 rd, float power, vec3 offset) {
     float t = 0.0;
-    for(int i=0; i<100; i++) {
-      vec3 p = ro + t*rd;
-      float dist = mandelbulbDE(p, power, zTime);
+    for(int i = 0; i < 100; i++) {
+      vec3 p = ro + t * rd;
+      float dist = mandelbulbDE(p, power, offset);
       if(dist < 0.001) return t;
       if(t > 20.0) break;
       t += dist;
@@ -106,38 +122,36 @@ const fragmentShaderSource = `
     vec3 forward = normalize(camTarget - camPos);
     vec3 right = normalize(cross(vec3(0,1,0), forward));
     vec3 up = cross(forward, right);
-
-    vec3 rd = normalize(uv.x*right + uv.y*up + forward);
+    vec3 rd = normalize(uv.x * right + uv.y * up + forward);
     vec3 ro = camPos;
 
-    // Power animiert von ca 6 bis 8, langsam
-    float power = 7.0 + 1.0 * sin(time * 0.3);
+    float power = 7.0 + 0.4 * sin(time * 0.3);
+    vec3 offset = vec3(
+      0.3 * sin(time * 0.2),
+      0.3 * sin(time * 0.23 + 1.57),
+      0.3 * sin(time * 0.25 + 3.14)
+    );
+    float noiseVal = 0.05 * fbm(ro * 0.5 + time * 0.1);
+    offset += noiseVal;
 
-    float dist = raymarch(ro, rd, power, zTime);
-
+    float dist = raymarch(ro, rd, power, offset);
     vec3 col = vec3(0.0);
     if(dist > 0.0) {
-      vec3 pos = ro + rd*dist;
-      vec3 normal = getNormal(pos, power, zTime);
-      vec3 lightDir = normalize(vec3(sin(time*0.25), cos(time*0.4), sin(time*0.15)));
-
+      vec3 pos = ro + rd * dist;
+      vec3 normal = getNormal(pos, power, offset);
+      vec3 lightDir = normalize(vec3(sin(time * 0.25), cos(time * 0.4), sin(time * 0.15)));
       float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
-      float ambient = 0.3;
-      float brightness = ambient + diff * 0.7;
-
-      col = vec3(0.1, 0.6, 0.9) * brightness;
+      col = vec3(diff * (0.4 + 0.6 * abs(sin(time * 0.5))));
     }
-
     gl_FragColor = vec4(col, 1.0);
   }
 `;
 
-// Shader compilieren
 function compileShader(type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-  if(!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
     console.error(gl.getShaderInfoLog(shader));
     return null;
   }
@@ -146,75 +160,69 @@ function compileShader(type, source) {
 
 const vertexShader = compileShader(gl.VERTEX_SHADER, vertexShaderSource);
 const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-
 const program = gl.createProgram();
 gl.attachShader(program, vertexShader);
 gl.attachShader(program, fragmentShader);
 gl.linkProgram(program);
-if(!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-  console.error(gl.getProgramInfoLog(program));
-}
 gl.useProgram(program);
 
-// Attribute und Uniforms
 const posLoc = gl.getAttribLocation(program, "position");
 const resLoc = gl.getUniformLocation(program, "resolution");
 const camPosLoc = gl.getUniformLocation(program, "camPos");
 const camTargetLoc = gl.getUniformLocation(program, "camTarget");
 const timeLoc = gl.getUniformLocation(program, "time");
-const zTimeLoc = gl.getUniformLocation(program, "zTime");
 
-// Fullscreen-Quad (2 Dreiecke)
 const buffer = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -1,-1,0,  1,-1,0,  -1,1,0,
-  -1,1,0,   1,-1,0,  1,1,0
+  -1,-1,0, 1,-1,0, -1,1,0,
+  -1,1,0, 1,-1,0, 1,1,0
 ]), gl.STATIC_DRAW);
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
-// OrbitControls Variablen
+// Orbit + Zoom Steuerung
 let azimuth = 0;
 let elevation = 0.4;
-let radius = 4.0;
+let radius = 3.5;
 let isDragging = false;
 let lastX = 0, lastY = 0;
+let azimuthVel = 0.0;
 let lastDist = null;
 
-// Maus-Events
 canvas.addEventListener("mousedown", e => {
   isDragging = true;
   lastX = e.clientX;
   lastY = e.clientY;
 });
 canvas.addEventListener("mousemove", e => {
-  if(isDragging) {
+  if (isDragging) {
     const dx = e.clientX - lastX;
     const dy = e.clientY - lastY;
     azimuth += dx * 0.005;
     elevation += dy * 0.005;
     elevation = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation));
+    azimuthVel = dx * 0.001;
     lastX = e.clientX;
     lastY = e.clientY;
   }
 });
-window.addEventListener("mouseup", () => { isDragging = false; });
+window.addEventListener("mouseup", () => isDragging = false);
 
-// Touch-Events (Drag + Pinch)
+// Touch
 canvas.addEventListener("touchstart", e => {
-  if(e.touches.length === 1) {
+  if (e.touches.length === 1) {
     isDragging = true;
     lastX = e.touches[0].clientX;
     lastY = e.touches[0].clientY;
-  } else if(e.touches.length === 2) {
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    lastDist = Math.sqrt(dx*dx + dy*dy);
+  } else if (e.touches.length === 2) {
+    let dx = e.touches[0].clientX - e.touches[1].clientX;
+    let dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastDist = Math.sqrt(dx * dx + dy * dy);
   }
 });
 canvas.addEventListener("touchmove", e => {
-  if(e.touches.length === 1 && isDragging) {
+  if (e.touches.length === 1 && isDragging) {
     const dx = e.touches[0].clientX - lastX;
     const dy = e.touches[0].clientY - lastY;
     azimuth += dx * 0.005;
@@ -222,61 +230,45 @@ canvas.addEventListener("touchmove", e => {
     elevation = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation));
     lastX = e.touches[0].clientX;
     lastY = e.touches[0].clientY;
-  } else if(e.touches.length === 2) {
-    const dx = e.touches[0].clientX - e.touches[1].clientX;
-    const dy = e.touches[0].clientY - e.touches[1].clientY;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if(lastDist !== null) {
-      radius -= (dist - lastDist)*0.01;
-      radius = Math.min(Math.max(radius, 0.5), 10.0);
+  } else if (e.touches.length === 2) {
+    let dx = e.touches[0].clientX - e.touches[1].clientX;
+    let dy = e.touches[0].clientY - e.touches[1].clientY;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+    if (lastDist !== null) {
+      radius -= (dist - lastDist) * 0.01;
+      radius = Math.max(0.1, Math.min(10.0, radius));
     }
     lastDist = dist;
   }
-  e.preventDefault();
-}, {passive:false});
-window.addEventListener("touchend", () => {
-  lastDist = null;
-  isDragging = false;
-});
+}, {passive: false});
+window.addEventListener("touchend", () => { lastDist = null; isDragging = false; });
 
-// Mausrad Zoom
+// Zoom mit Maus
 window.addEventListener("wheel", e => {
   radius += e.deltaY * 0.01;
-  radius = Math.min(Math.max(radius, 0.5), 10.0);
+  radius = Math.max(0.1, Math.min(10.0, radius));
 });
 
-// Render-Schleife
 function render(time) {
-  time *= 0.001; // Sekunden
-
-  gl.viewport(0, 0, canvas.width, canvas.height);
   gl.clear(gl.COLOR_BUFFER_BIT);
-
-  // Kamera Position über Kugelkoordinaten
-  let camX = radius * Math.cos(elevation) * Math.sin(azimuth);
-  let camY = radius * Math.sin(elevation);
-  let camZ = radius * Math.cos(elevation) * Math.cos(azimuth);
-  let camPos = [camX, camY, camZ];
-  let camTarget = [0, 0, 0];
-
   gl.uniform2f(resLoc, canvas.width, canvas.height);
-  gl.uniform3fv(camPosLoc, camPos);
-  gl.uniform3fv(camTargetLoc, camTarget);
-  gl.uniform1f(timeLoc, time);
-  gl.uniform1f(zTimeLoc, time * 0.5); // Zeitfaktor für zTime-Animation
+  gl.uniform1f(timeLoc, time * 0.001);
+
+  if (!isDragging) {
+    azimuth += azimuthVel;
+    azimuthVel *= 0.98;
+  }
+
+  const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
+  const camY = radius * Math.sin(elevation);
+  const camZ = radius * Math.cos(azimuth) * Math.cos(elevation);
+  gl.uniform3f(camPosLoc, camX, camY, camZ);
+  gl.uniform3f(camTargetLoc, 0, 0, 0);
 
   gl.drawArrays(gl.TRIANGLES, 0, 6);
-
   requestAnimationFrame(render);
 }
-
 requestAnimationFrame(render);
-
-window.addEventListener("resize", () => {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  gl.viewport(0, 0, canvas.width, canvas.height);
-});
 </script>
 </body>
 </html>
