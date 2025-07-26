@@ -141,10 +141,7 @@ const fragmentShaderSource = `
       vec3 normal = getNormal(pos, power, offset);
       vec3 lightDir = normalize(vec3(sin(time * 0.25), cos(time * 0.4), sin(time * 0.15)));
       float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
-      // metallisch-graue Farbe
-      vec3 baseColor = vec3(0.6, 0.6, 0.6);
-      float metalFactor = 0.8; // Glanzstärke
-      col = baseColor * diff * (0.5 + 0.5 * metalFactor);
+      col = vec3(diff * (0.4 + 0.6 * abs(sin(time * 0.5))));
     }
     gl_FragColor = vec4(col, 1.0);
   }
@@ -249,7 +246,7 @@ window.addEventListener("touchend", () => { lastDist = null; isDragging = false;
 // Zoom mit Maus
 window.addEventListener("wheel", e => {
   radius += e.deltaY * 0.01;
-  radius = Math.max(0.1, Math.min(10.0, radius)); // minimal 0.1 für Nahzoom
+  radius = Math.max(0.1, Math.min(10.0, radius));
 });
 
 function render(time) {
