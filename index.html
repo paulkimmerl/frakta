@@ -2,19 +2,23 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>Mandelbulb Glas</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mandelbulb Glass</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
       margin: 0;
-      height: 100%;
-      overflow: hidden;
+      padding: 0;
       background: black;
+      overflow: hidden;
+      height: 100%;
+      width: 100%;
+      touch-action: none;
+      user-select: none;
     }
     canvas {
       display: block;
-      width: 100%;
-      height: 100%;
+      width: 100vw;
+      height: 100vh;
     }
   </style>
 </head>
@@ -22,12 +26,10 @@
 <canvas id="glcanvas"></canvas>
 <script>
 const canvas = document.getElementById("glcanvas");
-const gl = canvas.getContext("webgl", { alpha: true });
+const gl = canvas.getContext("webgl");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 gl.viewport(0, 0, canvas.width, canvas.height);
-gl.enable(gl.BLEND);
-gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
 const vertexShaderSource = `
   attribute vec3 position;
@@ -129,22 +131,23 @@ const fragmentShaderSource = `
       0.3 * sin(time * 0.23 + 1.57),
       0.3 * sin(time * 0.25 + 3.14)
     );
-    offset += 0.05 * fbm(ro * 0.5 + time * 0.1);
+    float noiseVal = 0.05 * fbm(ro * 0.5 + time * 0.1);
+    offset += noiseVal;
 
     float dist = raymarch(ro, rd, power, offset);
     vec3 col = vec3(0.0);
-    float alpha = 0.0;
-
     if(dist > 0.0) {
       vec3 pos = ro + rd * dist;
       vec3 normal = getNormal(pos, power, offset);
-      vec3 lightDir = normalize(vec3(1.0, 1.0, 1.0));
-      float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
-      col = mix(vec3(0.2,0.6,0.8), vec3(1.0), diff) * 0.8;
-      alpha = 0.2 + 0.2 * diff; // Glas-Effekt
+      vec3 viewDir = normalize(ro - pos);
+      vec3 reflectDir = reflect(-viewDir, normal);
+      float fresnel = pow(1.0 - dot(viewDir, normal), 3.0) * 0.9 + 0.1;
+
+      // Glas-Look durch Reflektion + transparenter Hintergrund
+      col = mix(vec3(0.05, 0.1, 0.15), vec3(1.0), fresnel);
     }
 
-    gl_FragColor = vec4(col, alpha);
+    gl_FragColor = vec4(col, 0.2); // halbtransparent
   }
 `;
 
@@ -182,7 +185,7 @@ gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 
-// Orbit-Steuerung
+// Orbit + Zoom Steuerung
 let azimuth = 0;
 let elevation = 0.4;
 let radius = 3.5;
@@ -249,6 +252,7 @@ window.addEventListener("wheel", e => {
 });
 
 function render(time) {
+  gl.clearColor(0.0, 0.0, 0.0, 0.0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(timeLoc, time * 0.001);
