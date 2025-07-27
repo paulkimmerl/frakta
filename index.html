@@ -167,7 +167,7 @@ function render(time) {
 
   // 🔁 Langsamere Auto-Rotation (HALB so schnell)
   if (!isDragging) {
-    azimuthVel += 0.00005;
+    azimuthVel += 0.00001;
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
   }
