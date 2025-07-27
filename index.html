@@ -254,9 +254,9 @@ function render(time) {
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(timeLoc, time * 0.001);
 
-  // Langsames Auto-Rotate
   if (!isDragging) {
-    azimuth += 0.0002; // sehr langsam
+    azimuth += azimuthVel;
+    azimuthVel *= 0.98;
   }
 
   const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
