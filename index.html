@@ -41,22 +41,14 @@ const vertexShaderSource = `
 `;
 
 const fragmentShaderSource = `
-// GLSL Shader wie gehabt ...
-// (Kürze hier aus Platzgründen nicht – du hast ja schon alles in deinem Code.)
-precision highp float;
-uniform vec2 resolution;
-uniform vec3 camPos;
-uniform vec3 camTarget;
-uniform float time;
-
-// hash, noise, fbm, mandelbulbDE, getNormal, raymarch ... alles gleich
-
-// ... (bitte hier den gleichen Shader wie im vorherigen Code verwenden) ...
-// Ich lasse ihn jetzt aus, da er sich nicht verändert hat.
-// Falls du willst, füge ich dir gern die Version mit Shader auch vollständig ein.
+// === HIER DEIN MANDELBULB GLSL SHADER EINSETZEN ===
+// Muss gültiger Fragment-Shader sein mit:
+// uniform vec2 resolution;
+// uniform vec3 camPos;
+// uniform vec3 camTarget;
+// uniform float time;
 `;
 
-// === Shader-Setup ===
 function compileShader(type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
@@ -94,7 +86,7 @@ gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 // === Orbit und Zoom ===
 let azimuth = 0;
 let elevation = 0.4;
-let radius = 2.0;
+let radius = 1.2; // ✅ Näher dran
 let isDragging = false;
 let lastX = 0, lastY = 0;
 let azimuthVel = 0.0;
@@ -119,7 +111,7 @@ canvas.addEventListener("mousemove", e => {
 });
 window.addEventListener("mouseup", () => isDragging = false);
 
-// Touch Unterstützung
+// Touch-Unterstützung
 canvas.addEventListener("touchstart", e => {
   if (e.touches.length === 1) {
     isDragging = true;
@@ -165,9 +157,8 @@ function render(time) {
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(timeLoc, time * 0.001);
 
-  // 🔁 Langsamere Auto-Rotation (HALB so schnell)
   if (!isDragging) {
-    azimuthVel += 0.00001;
+    azimuthVel += 0.00001; // ✅ halb so schnell
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
   }
