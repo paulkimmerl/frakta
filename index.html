@@ -184,7 +184,7 @@ gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 // Orbit + Zoom Steuerung
 let azimuth = 0;
 let elevation = 0.4;
-let radius = 2.0; // Kamera näher
+let radius = 2.0;
 let isDragging = false;
 let lastX = 0, lastY = 0;
 let azimuthVel = 0.0;
@@ -254,9 +254,9 @@ function render(time) {
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(timeLoc, time * 0.001);
 
-  // Sehr langsame Auto-Rotation
+  // Langsame Auto-Rotation
   if (!isDragging) {
-    azimuthVel += 0.00005;
+    azimuthVel += 0.0001;
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
   }
