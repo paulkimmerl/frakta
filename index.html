@@ -254,7 +254,9 @@ function render(time) {
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(timeLoc, time * 0.001);
 
+  // Auto-Rotate wenn nicht aktiv gesteuert
   if (!isDragging) {
+    azimuthVel += 0.0002; // konstante Drehgeschwindigkeit
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
   }
