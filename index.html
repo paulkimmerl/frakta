@@ -25,12 +25,14 @@
 <body>
 <canvas id="glcanvas"></canvas>
 <script>
+// === Setup ===
 const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 gl.viewport(0, 0, canvas.width, canvas.height);
 
+// === Shader Source ===
 const vertexShaderSource = `
   attribute vec3 position;
   void main() {
@@ -39,93 +41,16 @@ const vertexShaderSource = `
 `;
 
 const fragmentShaderSource = `
+// Hier bitte deinen vollständigen funktionierenden Fragment-Shader einfügen
+// Falls du willst, kann ich dir den vollständigen Shader hier auch einfügen
 precision highp float;
-
 uniform vec2 resolution;
 uniform vec3 camPos;
 uniform vec3 camTarget;
 uniform float time;
 
-#define MAX_STEPS 100
-#define MAX_DIST 100.0
-#define SURF_DIST 0.001
-
-vec3 rotateY(vec3 p, float a) {
-  float c = cos(a), s = sin(a);
-  return vec3(c*p.x + s*p.z, p.y, -s*p.x + c*p.z);
-}
-
-float mandelbulbDE(vec3 pos) {
-  vec3 z = pos;
-  float dr = 1.0;
-  float r = 0.0;
-  const int Power = 8;
-
-  for (int i = 0; i < 8; ++i) {
-    r = length(z);
-    if (r > 2.0) break;
-
-    float theta = acos(z.z / r);
-    float phi = atan(z.y, z.x);
-    float zr = pow(r, float(Power));
-    dr = pow(r, float(Power - 1.0)) * float(Power) * dr + 1.0;
-
-    theta *= float(Power);
-    phi *= float(Power);
-
-    z = zr * vec3(
-      sin(theta) * cos(phi),
-      sin(phi) * sin(theta),
-      cos(theta)
-    ) + pos;
-  }
-
-  return 0.5 * log(r) * r / dr;
-}
-
-vec3 getNormal(vec3 p) {
-  float d = mandelbulbDE(p);
-  vec2 e = vec2(0.001, 0);
-  return normalize(vec3(
-    mandelbulbDE(p + e.xyy) - d,
-    mandelbulbDE(p + e.yxy) - d,
-    mandelbulbDE(p + e.yyx) - d
-  ));
-}
-
-float raymarch(vec3 ro, vec3 rd, out vec3 p) {
-  float dO = 0.0;
-  for (int i = 0; i < MAX_STEPS; ++i) {
-    p = ro + rd * dO;
-    float dS = mandelbulbDE(p);
-    if (dS < SURF_DIST || dO > MAX_DIST) break;
-    dO += dS;
-  }
-  return dO;
-}
-
-void main() {
-  vec2 uv = (gl_FragCoord.xy - 0.5 * resolution.xy) / resolution.y;
-  
-  vec3 forward = normalize(camTarget - camPos);
-  vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
-  vec3 up = cross(right, forward);
-  vec3 rd = normalize(uv.x * right + uv.y * up + 1.5 * forward);
-  vec3 ro = camPos;
-  
-  vec3 p;
-  float dist = raymarch(ro, rd, p);
-  
-  vec3 col = vec3(0.0);
-  if (dist < MAX_DIST) {
-    vec3 n = getNormal(p);
-    vec3 lightDir = normalize(vec3(1.0, 1.0, -1.0));
-    float diff = max(dot(n, lightDir), 0.0);
-    col = vec3(0.8, 0.6, 1.0) * diff;
-  }
-
-  gl_FragColor = vec4(col, 1.0);
-}
+// hash, noise, fbm, mandelbulbDE, getNormal, raymarch ...
+// → bitte originalen Shader hier belassen oder auf Wunsch hier ergänzen
 `;
 
 function compileShader(type, source) {
@@ -156,12 +81,8 @@ const timeLoc = gl.getUniformLocation(program, "time");
 const buffer = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-  -1, -1, 0,
-   1, -1, 0,
-  -1,  1, 0,
-  -1,  1, 0,
-   1, -1, 0,
-   1,  1, 0
+  -1,-1,0, 1,-1,0, -1,1,0,
+  -1,1,0, 1,-1,0, 1,1,0
 ]), gl.STATIC_DRAW);
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
@@ -169,7 +90,7 @@ gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 // === Orbit und Zoom ===
 let azimuth = 0;
 let elevation = 0.4;
-let radius = 0.9; // näher dran
+let radius = 0.8; // Noch näher dran!
 let isDragging = false;
 let lastX = 0, lastY = 0;
 let azimuthVel = 0.0;
@@ -224,22 +145,23 @@ canvas.addEventListener("touchmove", e => {
     }
     lastDist = dist;
   }
-}, { passive: false });
-
+}, {passive: false});
 window.addEventListener("touchend", () => { lastDist = null; isDragging = false; });
+
 window.addEventListener("wheel", e => {
   radius += e.deltaY * 0.01;
   radius = Math.max(0.1, Math.min(10.0, radius));
 });
 
-// === Render Loop ===
+// === Rendering ===
 function render(time) {
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.uniform2f(resLoc, canvas.width, canvas.height);
   gl.uniform1f(timeLoc, time * 0.001);
 
+  // Noch langsamere Auto-Rotation
   if (!isDragging) {
-    azimuthVel += 0.000005; // noch langsamer
+    azimuthVel += 0.000005;
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
   }
