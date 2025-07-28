@@ -1,7 +1,8 @@
-<!DOCTYPE html><html lang="de">
+<!DOCTYPE html>
+<html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <title>Mandelbulb Lights BW</title>
+  <title>Mandelbulb Fragmentiertes Licht</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     html, body {
@@ -28,89 +29,262 @@ const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl");
 canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
-gl.viewport(0, 0, canvas.width, canvas.height);const vertexShaderSource = attribute vec3 position; void main() { gl_Position = vec4(position, 1.0); };
+gl.viewport(0, 0, canvas.width, canvas.height);
 
-const fragmentShaderSource = ` precision highp float; uniform vec2 resolution; uniform vec3 camPos; uniform vec3 camTarget; uniform float time;
-
-float hash(vec3 p) { p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3)); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-
-float noise(vec3 p){ vec3 i = floor(p); vec3 f = fract(p); f = ff(3.0-2.0*f); float n = mix(mix(mix(hash(i), hash(i+vec3(1,0,0)),f.x), mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)),f.x),f.y), mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)),f.x), mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)),f.x),f.y),f.z); return n; }
-
-float fbm(vec3 p) { float f = 0.0; float amp = 0.5; float freq = 0.3; for(int i = 0; i < 4; i++) { f += amp * noise(p * freq); freq *= 2.0; amp *= 0.5; } return f; }
-
-float mandelbulbDE(vec3 pos, float power, vec3 offset) { vec3 z = pos; float dr = 1.0; float r = 0.0; const int ITER = 8; for(int i = 0; i < ITER; i++) { r = length(z); if (r > 2.0) break; float theta = acos(z.z / r); float phi = atan(z.y, z.x); dr = pow(r, power - 1.0) * power * dr + 1.0; float zr = pow(r, power); theta *= power; phi *= power; z = zr * vec3(sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)) + pos + offset; } return 0.5 * log(r) * r / dr; }
-
-vec3 getNormal(vec3 p, float power, vec3 offset) { float eps = 0.001; float d = mandelbulbDE(p, power, offset); return normalize(vec3( mandelbulbDE(p + vec3(eps, 0, 0), power, offset) - d, mandelbulbDE(p + vec3(0, eps, 0), power, offset) - d, mandelbulbDE(p + vec3(0, 0, eps), power, offset) - d )); }
-
-float raymarch(vec3 ro, vec3 rd, float power, vec3 offset) { float t = 0.0; for(int i = 0; i < 100; i++) { vec3 p = ro + t * rd; float dist = mandelbulbDE(p, power, offset); if(dist < 0.001) return t; if(t > 20.0) break; t += dist; } return -1.0; }
-
-void main() { vec2 uv = (gl_FragCoord.xy / resolution) * 2.0 - 1.0; uv.x *= resolution.x / resolution.y;
-
-vec3 forward = normalize(camTarget - camPos);
-vec3 right = normalize(cross(vec3(0,1,0), forward));
-vec3 up = cross(forward, right);
-vec3 rd = normalize(uv.x * right + uv.y * up + forward);
-vec3 ro = camPos;
-
-float power = 7.0 + 0.4 * sin(time * 0.3);
-vec3 offset = vec3(
-  0.3 * sin(time * 0.2),
-  0.3 * sin(time * 0.23 + 1.57),
-  0.3 * sin(time * 0.25 + 3.14)
-);
-
-float dist = raymarch(ro, rd, power, offset);
-vec3 col = vec3(0.0);
-if(dist > 0.0) {
-  vec3 pos = ro + rd * dist;
-  vec3 normal = getNormal(pos, power, offset);
-  vec3 viewDir = normalize(ro - pos);
-
-  vec3 lightCol = vec3(1.0);
-  float accum = 0.0;
-  for (int i = 0; i < 16; i++) {
-    float t = time * 0.2 + float(i);
-    vec3 lightPos = vec3(
-      sin(t * 0.7 + float(i)) * 1.5,
-      cos(t * 0.9 + float(i)) * 1.5,
-      sin(t * 0.5 + float(i)) * 1.5
-    );
-    vec3 lightDir = normalize(lightPos - pos);
-    float diff = max(dot(normal, lightDir), 0.0);
-    float spec = pow(max(dot(reflect(-lightDir, normal), viewDir), 0.0), 32.0);
-    float attenuation = 1.0 / (0.5 + length(lightPos - pos));
-    accum += (diff * 0.4 + spec * 0.6) * attenuation;
-  }
-  col = vec3(accum);
+const vertexShaderSource = `
+attribute vec3 position;
+void main() {
+  gl_Position = vec4(position, 1.0);
 }
-col = pow(col, vec3(0.4545)); // Gamma correction
-gl_FragColor = vec4(col, 1.0);
+`;
 
-} `;
+const fragmentShaderSource = `
+precision highp float;
+uniform vec2 resolution;
+uniform vec3 camPos;
+uniform vec3 camTarget;
+uniform float time;
 
-function compileShader(type, source) { const shader = gl.createShader(type); gl.shaderSource(shader, source); gl.compileShader(shader); if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(shader)); return null; } return shader; }
+float hash(vec3 p) {
+  p = fract(p * 0.3183099 + vec3(0.1,0.2,0.3));
+  p *= 17.0;
+  return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
 
-const vertexShader = compileShader(gl.VERTEX_SHADER, vertexShaderSource); const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource); const program = gl.createProgram(); gl.attachShader(program, vertexShader); gl.attachShader(program, fragmentShader); gl.linkProgram(program); gl.useProgram(program);
+float noise(vec3 p){
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f*f*(3.0-2.0*f);
+  float n = mix(mix(mix(hash(i), hash(i+vec3(1,0,0)),f.x),
+                    mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)),f.x),f.y),
+                mix(mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)),f.x),
+                    mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)),f.x),f.y),f.z);
+  return n;
+}
 
-const posLoc = gl.getAttribLocation(program, "position"); const resLoc = gl.getUniformLocation(program, "resolution"); const camPosLoc = gl.getUniformLocation(program, "camPos"); const camTargetLoc = gl.getUniformLocation(program, "camTarget"); const timeLoc = gl.getUniformLocation(program, "time");
+float fbm(vec3 p) {
+  float f = 0.0;
+  float amp = 0.5;
+  float freq = 0.25;
+  for(int i = 0; i < 5; i++) {
+    f += amp * noise(p * freq);
+    freq *= 2.0;
+    amp *= 0.5;
+  }
+  return f;
+}
 
-const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([ -1,-1,0, 1,-1,0, -1,1,0, -1,1,0, 1,-1,0, 1,1,0 ]), gl.STATIC_DRAW); gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+float mandelbulbDE(vec3 pos, float power, vec3 offset) {
+  vec3 z = pos;
+  float dr = 1.0;
+  float r = 0.0;
+  for(int i = 0; i < 8; i++) {
+    r = length(z);
+    if (r > 2.0) break;
+    float theta = acos(z.z / r);
+    float phi = atan(z.y, z.x);
+    dr = pow(r, power - 1.0) * power * dr + 1.0;
+    float zr = pow(r, power);
+    theta *= power;
+    phi *= power;
+    z = zr * vec3(sin(theta)*cos(phi), sin(theta)*sin(phi), cos(theta)) + pos + offset;
+  }
+  return 0.5 * log(r) * r / dr;
+}
 
-let azimuth = 0; let elevation = 0.4; let radius = 1.75; let isDragging = false; let lastX = 0, lastY = 0; let azimuthVel = 0.0005; let lastDist = null;
+vec3 getNormal(vec3 p, float power, vec3 offset) {
+  float eps = 0.001;
+  float d = mandelbulbDE(p, power, offset);
+  return normalize(vec3(
+    mandelbulbDE(p + vec3(eps,0,0), power, offset) - d,
+    mandelbulbDE(p + vec3(0,eps,0), power, offset) - d,
+    mandelbulbDE(p + vec3(0,0,eps), power, offset) - d
+  ));
+}
 
-canvas.addEventListener("mousedown", e => { isDragging = true; lastX = e.clientX; lastY = e.clientY; }); canvas.addEventListener("mousemove", e => { if (isDragging) { const dx = e.clientX - lastX; const dy = e.clientY - lastY; azimuth += dx * 0.002; elevation += dy * 0.002; elevation = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation)); azimuthVel = dx * 0.0002; lastX = e.clientX; lastY = e.clientY; } }); window.addEventListener("mouseup", () => isDragging = false);
+float raymarch(vec3 ro, vec3 rd, float power, vec3 offset) {
+  float t = 0.0;
+  for(int i = 0; i < 100; i++) {
+    vec3 p = ro + rd * t;
+    float d = mandelbulbDE(p, power, offset);
+    if(d < 0.001) return t;
+    if(t > 20.0) break;
+    t += d;
+  }
+  return -1.0;
+}
 
-canvas.addEventListener("touchstart", e => { if (e.touches.length === 1) { isDragging = true; lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; } else if (e.touches.length === 2) { let dx = e.touches[0].clientX - e.touches[1].clientX; let dy = e.touches[0].clientY - e.touches[1].clientY; lastDist = Math.sqrt(dx * dx + dy * dy); } }); canvas.addEventListener("touchmove", e => { if (e.touches.length === 1 && isDragging) { const dx = e.touches[0].clientX - lastX; const dy = e.touches[0].clientY - lastY; azimuth += dx * 0.002; elevation += dy * 0.002; elevation = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, elevation)); lastX = e.touches[0].clientX; lastY = e.touches[0].clientY; } else if (e.touches.length === 2) { let dx = e.touches[0].clientX - e.touches[1].clientX; let dy = e.touches[0].clientY - e.touches[1].clientY; let dist = Math.sqrt(dx * dx + dy * dy); if (lastDist !== null) { radius -= (dist - lastDist) * 0.005; radius = Math.max(0.1, Math.min(10.0, radius)); } lastDist = dist; } }, {passive: false}); window.addEventListener("touchend", () => { lastDist = null; isDragging = false; });
+void main() {
+  vec2 uv = (gl_FragCoord.xy / resolution.xy) * 2.0 - 1.0;
+  uv.x *= resolution.x / resolution.y;
 
-window.addEventListener("wheel", e => { radius += e.deltaY * 0.005; radius = Math.max(0.1, Math.min(10.0, radius)); });
+  vec3 forward = normalize(camTarget - camPos);
+  vec3 right = normalize(cross(vec3(0,1,0), forward));
+  vec3 up = cross(forward, right);
+  vec3 rd = normalize(uv.x * right + uv.y * up + forward);
+  vec3 ro = camPos;
 
-function render(time) { gl.clear(gl.COLOR_BUFFER_BIT); gl.uniform2f(resLoc, canvas.width, canvas.height); gl.uniform1f(timeLoc, time * 0.001);
+  float slowTime = time * 0.3;
+  float power = 7.0 + 0.2 * sin(slowTime * 0.2);
+  vec3 offset = vec3(
+    0.2 * sin(slowTime * 0.15),
+    0.2 * sin(slowTime * 0.19 + 1.0),
+    0.2 * sin(slowTime * 0.17 + 2.5)
+  );
+  offset += 0.03 * fbm(ro * 0.5 + slowTime * 0.05);
 
-if (!isDragging) { azimuth += azimuthVel; azimuthVel *= 0.98; }
+  float dist = raymarch(ro, rd, power, offset);
+  vec3 col = vec3(0.0);
 
-const camX = radius * Math.sin(azimuth) * Math.cos(elevation); const camY = radius * Math.sin(elevation); const camZ = radius * Math.cos(azimuth) * Math.cos(elevation); gl.uniform3f(camPosLoc, camX, camY, camZ); gl.uniform3f(camTargetLoc, 0, 0, 0);
+  if(dist > 0.0){
+    vec3 pos = ro + rd * dist;
+    vec3 normal = getNormal(pos, power, offset);
+    vec3 lightDir = normalize(vec3(sin(slowTime * 0.1), 1.0, cos(slowTime * 0.1)));
 
-gl.drawArrays(gl.TRIANGLES, 0, 6); requestAnimationFrame(render); } requestAnimationFrame(render); </script>
+    // Noise-gemoduliertes Licht
+    float lightNoise = fbm(pos * 3.0 + slowTime * 0.1);
+    lightNoise = smoothstep(0.4, 1.0, lightNoise); // kontrollierter Bereich
 
+    float diff = clamp(dot(normal, lightDir), 0.0, 1.0);
+    diff *= lightNoise;
+
+    float spec = pow(max(dot(reflect(-lightDir, normal), -rd), 0.0), 32.0);
+    spec *= lightNoise;
+
+    col = vec3(1.0) * diff + vec3(1.0) * spec * 0.2;
+
+    col = col / (col + vec3(1.0));
+    col = pow(col, vec3(0.9));
+  }
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compileShader(type, source) {
+  const shader = gl.createShader(type);
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(shader));
+    return null;
+  }
+  return shader;
+}
+
+const vertexShader = compileShader(gl.VERTEX_SHADER, vertexShaderSource);
+const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+const program = gl.createProgram();
+gl.attachShader(program, vertexShader);
+gl.attachShader(program, fragmentShader);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+const posLoc = gl.getAttribLocation(program, "position");
+const resLoc = gl.getUniformLocation(program, "resolution");
+const camPosLoc = gl.getUniformLocation(program, "camPos");
+const camTargetLoc = gl.getUniformLocation(program, "camTarget");
+const timeLoc = gl.getUniformLocation(program, "time");
+
+const buffer = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1,-1,0, 1,-1,0, -1,1,0,
+  -1,1,0, 1,-1,0, 1,1,0
+]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(posLoc);
+gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
+
+// Kamerasteuerung
+let azimuth = 0;
+let elevation = 0.4;
+let radius = 1.75;
+let targetAzimuth = 0;
+let targetElevation = 0.4;
+let targetRadius = 1.75;
+let isDragging = false;
+let lastX = 0, lastY = 0;
+let lastDist = null;
+
+canvas.addEventListener("mousedown", e => {
+  isDragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+});
+canvas.addEventListener("mousemove", e => {
+  if (isDragging) {
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    targetAzimuth += dx * 0.002;
+    targetElevation += dy * 0.002;
+    targetElevation = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, targetElevation));
+    lastX = e.clientX;
+    lastY = e.clientY;
+  }
+});
+window.addEventListener("mouseup", () => isDragging = false);
+
+// Touch
+canvas.addEventListener("touchstart", e => {
+  if (e.touches.length === 1) {
+    isDragging = true;
+    lastX = e.touches[0].clientX;
+    lastY = e.touches[0].clientY;
+  } else if (e.touches.length === 2) {
+    let dx = e.touches[0].clientX - e.touches[1].clientX;
+    let dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastDist = Math.sqrt(dx * dx + dy * dy);
+  }
+});
+canvas.addEventListener("touchmove", e => {
+  if (e.touches.length === 1 && isDragging) {
+    const dx = e.touches[0].clientX - lastX;
+    const dy = e.touches[0].clientY - lastY;
+    targetAzimuth += dx * 0.002;
+    targetElevation += dy * 0.002;
+    targetElevation = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, targetElevation));
+    lastX = e.touches[0].clientX;
+    lastY = e.touches[0].clientY;
+  } else if (e.touches.length === 2) {
+    let dx = e.touches[0].clientX - e.touches[1].clientX;
+    let dy = e.touches[0].clientY - e.touches[1].clientY;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+    if (lastDist !== null) {
+      targetRadius -= (dist - lastDist) * 0.01;
+      targetRadius = Math.max(0.5, Math.min(10.0, targetRadius));
+    }
+    lastDist = dist;
+  }
+}, {passive: false});
+window.addEventListener("touchend", () => { lastDist = null; isDragging = false; });
+
+// Zoom mit Maus
+window.addEventListener("wheel", e => {
+  targetRadius += e.deltaY * 0.01;
+  targetRadius = Math.max(0.5, Math.min(10.0, targetRadius));
+});
+
+function render(time) {
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.uniform2f(resLoc, canvas.width, canvas.height);
+  gl.uniform1f(timeLoc, time * 0.001);
+
+  azimuth += (targetAzimuth - azimuth) * 0.05;
+  elevation += (targetElevation - elevation) * 0.05;
+  radius += (targetRadius - radius) * 0.05;
+
+  targetAzimuth += 0.0001;
+
+  const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
+  const camY = radius * Math.sin(elevation);
+  const camZ = radius * Math.cos(azimuth) * Math.cos(elevation);
+  gl.uniform3f(camPosLoc, camX, camY, camZ);
+  gl.uniform3f(camTargetLoc, 0, 0, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
 </body>
 </html>
