@@ -257,6 +257,9 @@ function render(time) {
   if (!isDragging) {
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
+
+    // <<< Sehr langsame Auto-Rotation hinzugefügt >>>
+    azimuth += 0.0002;
   }
 
   const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
