@@ -184,7 +184,7 @@ gl.vertexAttribPointer(posLoc, 3, gl.FLOAT, false, 0, 0);
 // Orbit + Zoom Steuerung
 let azimuth = 0;
 let elevation = 0.4;
-let radius = 3.5;
+let radius = 1.75; // <<< Kamera näher dran (vorher 3.5)
 let isDragging = false;
 let lastX = 0, lastY = 0;
 let azimuthVel = 0.0;
@@ -258,8 +258,8 @@ function render(time) {
     azimuth += azimuthVel;
     azimuthVel *= 0.98;
 
-    // <<< Sehr langsame Auto-Rotation hinzugefügt >>>
-    azimuth += 0.0002;
+    // <<< Sehr langsame Auto-Rotation >>>
+    azimuth += 0.005;
   }
 
   const camX = radius * Math.sin(azimuth) * Math.cos(elevation);
