@@ -14,13 +14,21 @@ canvas { display:block; width:100vw; height:100vh; }
 <script>
 const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-gl.viewport(0,0,canvas.width,canvas.height);
 
+// Canvas dynamisch skalieren
+function resizeCanvas(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Shaderquellen
 const vertexShaderSource = `attribute vec3 position; void main(){ gl_Position = vec4(position,1.0); }`;
+
 const fragmentShaderSource = `
-precision highp float;
+precision mediump float;
 uniform vec2 resolution;
 uniform vec3 camPos;
 uniform vec3 camTarget;
@@ -43,8 +51,8 @@ float mandelbulbDE(vec3 pos,float power,vec3 offset){
     float theta=acos(z.z/r); float phi=atan(z.y,z.x);
     dr=pow(r,power-1.0)*power*dr+1.0;
     float zr=pow(r,power); theta*=power; phi*=power;
-    float tSlow = time*0.02;  // minimal langsamer
-    float tMed  = time*0.05;  // minimal schneller
+    float tSlow = time*0.02;  
+    float tMed  = time*0.05;  
     z=zr*vec3(
       sin(theta+2.0*sin(tSlow))*cos(phi+2.0*sin(tMed)),
       sin(theta+2.0*sin(tMed))*sin(phi+2.0*sin(tSlow)),
@@ -66,10 +74,10 @@ vec3 getNormal(vec3 p,float power,vec3 offset){
 // Optimiertes Raymarching
 float raymarch(vec3 ro,vec3 rd,float power,vec3 offset){
   float t=0.0;
-  for(int i=0;i<80;i++){ // 100 -> 80 Schritte für Performance
+  for(int i=0;i<60;i++){
     vec3 p=ro+rd*t;
     float d=mandelbulbDE(p,power,offset);
-    if(d<0.002) return t;  // leicht größer für stabile Kanten
+    if(d<0.002) return t;  
     if(t>20.0) break;
     t+=d;
   }
@@ -77,12 +85,12 @@ float raymarch(vec3 ro,vec3 rd,float power,vec3 offset){
 }
 
 void main(){
-  // Supersampling 2x2
   vec3 col=vec3(0.0);
   for(int x=0;x<2;x++){
     for(int y=0;y<2;y++){
       vec2 uv = (gl_FragCoord.xy + vec2(float(x),float(y))*0.5)/resolution.xy*2.0-1.0;
-      uv.x*=resolution.x/resolution.y;
+      uv.x *= resolution.x/resolution.y;
+
       vec3 forward=normalize(camTarget-camPos);
       vec3 right=normalize(cross(vec3(0,1,0),forward));
       vec3 up=cross(forward,right);
@@ -107,7 +115,7 @@ void main(){
       }
     }
   }
-  col/=4.0; // Mittelwert Supersampling
+  col/=4.0;
   col=col/(col+vec3(1.0));
   col=pow(col,vec3(0.9));
   gl_FragColor=vec4(col,1.0);
@@ -142,10 +150,14 @@ gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,0,1,-1,0,-1,1,0,-1,1,0,1,-
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc,3,gl.FLOAT,false,0,0);
 
-// Kamera init näher dran
+// Kamera init
 let azimuth=0,elevation=0.4,radius=1.2;
 let targetAzimuth=0,targetElevation=0.4,targetRadius=1.2;
 let isDragging=false,lastX=0,lastY=0,lastDist=null;
+
+// Neue Zoom-Limits
+const MIN_RADIUS = 0.3;  // nicht zu nah
+const MAX_RADIUS = 3.0;  // weiter raus
 
 canvas.addEventListener("mousedown", e=>{isDragging=true; lastX=e.clientX; lastY=e.clientY;});
 canvas.addEventListener("mousemove", e=>{if(isDragging){let dx=e.clientX-lastX; let dy=e.clientY-lastY; targetAzimuth+=dx*0.002; targetElevation+=dy*0.002; lastX=e.clientX; lastY=e.clientY;}} );
@@ -157,10 +169,22 @@ canvas.addEventListener("touchstart", e=>{
 });
 canvas.addEventListener("touchmove", e=>{
   if(e.touches.length===1 && isDragging){let dx=e.touches[0].clientX-lastX; let dy=e.touches[0].clientY-lastY; targetAzimuth+=dx*0.002; targetElevation+=dy*0.002; lastX=e.touches[0].clientX; lastY=e.touches[0].clientY;}
-  else if(e.touches.length===2){let dx=e.touches[0].clientX-e.touches[1].clientX; let dy=e.touches[0].clientY-e.touches[1].clientY; let dist=Math.sqrt(dx*dx+dy*dy); if(lastDist!==null){targetRadius-=(dist-lastDist)*0.01; targetRadius=Math.max(0.5, Math.min(10,targetRadius));} lastDist=dist;}
+  else if(e.touches.length===2){
+    let dx = e.touches[0].clientX - e.touches[1].clientX;
+    let dy = e.touches[0].clientY - e.touches[1].clientY;
+    let dist = Math.sqrt(dx*dx + dy*dy);
+    if(lastDist!==null){
+      targetRadius -= (dist - lastDist)*0.01;
+      targetRadius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, targetRadius));
+    }
+    lastDist = dist;
+  }
 },{passive:false});
 window.addEventListener("touchend", ()=>{lastDist=null; isDragging=false;});
-window.addEventListener("wheel", e=>{targetRadius+=e.deltaY*0.01; targetRadius=Math.max(0.5,Math.min(10,targetRadius));});
+window.addEventListener("wheel", e=>{
+  targetRadius += e.deltaY*0.01;
+  targetRadius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, targetRadius));
+});
 
 function render(time){
   gl.clear(gl.COLOR_BUFFER_BIT);
@@ -171,7 +195,7 @@ function render(time){
   elevation+=(targetElevation-elevation)*0.05;
   radius+=(targetRadius-radius)*0.05;
 
-  targetAzimuth+=0.00003; // minimal langsamere Autorotation
+  targetAzimuth+=0.00003; // Autorotation
 
   const camX=radius*Math.sin(azimuth)*Math.cos(elevation);
   const camY=radius*Math.sin(elevation);
