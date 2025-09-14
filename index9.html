@@ -2,8 +2,8 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8" />
-<title>Mandelbulb Optimiert</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mandelbulb mit streifenförmigen Spotlights</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <style>
 html, body { margin:0; padding:0; background:#111; overflow:hidden; height:100%; width:100%; touch-action:none; user-select:none; }
 canvas { display:block; width:100vw; height:100vh; }
@@ -15,7 +15,6 @@ canvas { display:block; width:100vw; height:100vh; }
 const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl");
 
-// Canvas dynamisch skalieren
 function resizeCanvas(){
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -24,7 +23,6 @@ function resizeCanvas(){
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// Shaderquellen
 const vertexShaderSource = `attribute vec3 position; void main(){ gl_Position = vec4(position,1.0); }`;
 
 const fragmentShaderSource = `
@@ -32,7 +30,7 @@ precision mediump float;
 uniform vec2 resolution;
 uniform vec3 camPos;
 uniform vec3 camTarget;
-uniform float time;
+uniform float shaderTime;
 
 float hash(vec3 p){ p = fract(p*0.3183099 + vec3(0.1,0.2,0.3)); p *= 17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); }
 float noise(vec3 p){ vec3 i=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
@@ -42,17 +40,17 @@ float noise(vec3 p){ vec3 i=floor(p); vec3 f=fract(p); f=f*f*(3.0-2.0*f);
                   mix(hash(i+vec3(0,1,1)),hash(i+vec3(1,1,1)),f.x),f.y),f.z);
   return n;
 }
-float fbm(vec3 p){ float f=0.0; float amp=0.5; float freq=0.25; for(int i=0;i<5;i++){ f+=amp*noise(p*freq); freq*=2.0; amp*=0.5; } return f; }
+float fbm(vec3 p){ float f=0.0; float amp=0.5; float freq=0.25; for(int i=0;i<2;i++){ f+=amp*noise(p*freq); freq*=2.0; amp*=0.5; } return f; }
 
-float mandelbulbDE(vec3 pos,float power,vec3 offset){
+float mandelbulbDE(vec3 pos,float power,vec3 offset,float t){
   vec3 z=pos; float dr=1.0; float r=0.0;
   for(int i=0;i<8;i++){
     r=length(z); if(r>2.0) break;
     float theta=acos(z.z/r); float phi=atan(z.y,z.x);
     dr=pow(r,power-1.0)*power*dr+1.0;
     float zr=pow(r,power); theta*=power; phi*=power;
-    float tSlow = time*0.02;  
-    float tMed  = time*0.05;  
+    float tSlow = t*0.004;  
+    float tMed  = t*0.008;   
     z=zr*vec3(
       sin(theta+2.0*sin(tSlow))*cos(phi+2.0*sin(tMed)),
       sin(theta+2.0*sin(tMed))*sin(phi+2.0*sin(tSlow)),
@@ -62,60 +60,82 @@ float mandelbulbDE(vec3 pos,float power,vec3 offset){
   return 0.5*log(r)*r/dr;
 }
 
-vec3 getNormal(vec3 p,float power,vec3 offset){
-  float eps=0.001; float d=mandelbulbDE(p,power,offset);
+vec3 getNormal(vec3 p,float power,vec3 offset,float t){
+  float eps=0.002; float d=mandelbulbDE(p,power,offset,t);
   return normalize(vec3(
-    mandelbulbDE(p+vec3(eps,0,0),power,offset)-d,
-    mandelbulbDE(p+vec3(0,eps,0),power,offset)-d,
-    mandelbulbDE(p+vec3(0,0,eps),power,offset)-d
+    mandelbulbDE(p+vec3(eps,0,0),power,offset,t)-d,
+    mandelbulbDE(p+vec3(0,eps,0),power,offset,t)-d,
+    mandelbulbDE(p+vec3(0,0,eps),power,offset,t)-d
   ));
 }
 
-// Optimiertes Raymarching
-float raymarch(vec3 ro,vec3 rd,float power,vec3 offset){
-  float t=0.0;
-  for(int i=0;i<60;i++){
-    vec3 p=ro+rd*t;
-    float d=mandelbulbDE(p,power,offset);
-    if(d<0.002) return t;  
-    if(t>20.0) break;
-    t+=d;
+float raymarch(vec3 ro,vec3 rd,float power,vec3 offset,float t){
+  float d,tTotal=0.0;
+  for(int i=0;i<40;i++){
+    vec3 p=ro+rd*tTotal;
+    d=mandelbulbDE(p,power,offset,t);
+    if(d<0.003) return tTotal;
+    if(tTotal>20.0) break;
+    tTotal+=d;
   }
   return -1.0;
 }
 
 void main(){
   vec3 col=vec3(0.0);
-  for(int x=0;x<2;x++){
-    for(int y=0;y<2;y++){
-      vec2 uv = (gl_FragCoord.xy + vec2(float(x),float(y))*0.5)/resolution.xy*2.0-1.0;
-      uv.x *= resolution.x/resolution.y;
+  vec2 uv = (gl_FragCoord.xy)/resolution.xy*2.0-1.0;
+  uv.x *= resolution.x/resolution.y;
 
-      vec3 forward=normalize(camTarget-camPos);
-      vec3 right=normalize(cross(vec3(0,1,0),forward));
-      vec3 up=cross(forward,right);
-      vec3 rd=normalize(uv.x*right+uv.y*up+forward);
-      vec3 ro=camPos;
+  vec3 forward=normalize(camTarget-camPos);
+  vec3 right=normalize(cross(vec3(0,1,0),forward));
+  vec3 up=cross(forward,right);
+  vec3 rd=normalize(uv.x*right+uv.y*up+forward);
+  vec3 ro=camPos;
 
-      float slowTime=time*0.02;
-      float power=7.0+0.2*sin(slowTime*0.05);
-      vec3 offset=vec3(0.2*sin(slowTime*0.02),0.2*sin(slowTime*0.025+1.0),0.2*sin(slowTime*0.023+2.5));
-      offset += 0.03*fbm(ro*0.5+slowTime*0.01);
+  float tAnim = shaderTime;
+  float power=7.0+0.2*sin(tAnim*0.03);
+  vec3 offset=vec3(
+    0.2*sin(tAnim*0.015),
+    0.2*sin(tAnim*0.018+1.0),
+    0.2*sin(tAnim*0.017+2.5)
+  );
+  offset += 0.02*fbm(ro*0.5 + tAnim*0.005);
 
-      float dist=raymarch(ro,rd,power,offset);
-      if(dist>0.0){
-        vec3 pos=ro+rd*dist;
-        vec3 normal=getNormal(pos,power,offset);
-        vec3 lightDir=normalize(vec3(sin(slowTime*0.05),1.0,cos(slowTime*0.05)));
-        float lightNoise=fbm(pos*3.0+slowTime*0.05);
-        lightNoise=smoothstep(0.4,1.0,lightNoise);
-        float diff=clamp(dot(normal,lightDir),0.0,1.0)*lightNoise;
-        float spec=pow(max(dot(reflect(-lightDir,normal),-rd),0.0),32.0)*lightNoise*0.2;
-        col+=vec3(1.0)*diff + vec3(1.0)*spec;
-      }
+  float dist=raymarch(ro,rd,power,offset,tAnim);
+  if(dist>0.0){
+    vec3 pos=ro+rd*dist;
+    vec3 normal=getNormal(pos,power,offset,tAnim);
+
+    // --- Original Licht ---
+    vec3 lightDir1 = normalize(vec3(sin(tAnim*0.03),1.0,cos(tAnim*0.03)));
+    float lightNoise = fbm(pos*3.0+tAnim*0.03);
+    lightNoise = smoothstep(0.4,1.0,lightNoise);
+    float diff1 = clamp(dot(normal,lightDir1),0.0,1.0)*lightNoise;
+    float spec1 = pow(max(dot(reflect(-lightDir1,normal),-rd),0.0),32.0)*lightNoise*0.2;
+    col += vec3(1.0)*diff1 + vec3(1.0)*spec1;
+
+    // --- Streifenförmige Spotlights ---
+    for(int i=0;i<12;i++){
+        float angleOffset = float(i) * 0.5235987756; // 30° Abstand
+        float speedFactor = 0.6 + 0.3*hash(vec3(float(i),0.0,0.0)); // unterschiedliche Geschwindigkeit
+        float angleSpeed = tAnim * 0.5 * speedFactor + angleOffset; 
+        float radiusLight = 1.5;
+        float heightOffset = 0.6 + 0.4*sin(tAnim*0.3*speedFactor + float(i)); 
+        vec3 spotlightPos = vec3(
+            radiusLight * cos(angleSpeed),
+            heightOffset,
+            radiusLight * sin(angleSpeed)
+        );
+        vec3 spotDir = normalize(spotlightPos - pos);
+        float distToSpot = length(spotlightPos - pos);
+        float spotRange = 1.0;
+        float spotAtten = smoothstep(spotRange, 0.0, distToSpot);
+        // Streifen: sehr enger Fokus
+        float spotFocus = pow(clamp(dot(normal, spotDir), 0.0, 1.0), 128.0);
+        col += vec3(1.2) * spotAtten * spotFocus;
     }
   }
-  col/=4.0;
+
   col=col/(col+vec3(1.0));
   col=pow(col,vec3(0.9));
   gl_FragColor=vec4(col,1.0);
@@ -129,7 +149,6 @@ function compileShader(type,source){
   if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS)){ console.error(gl.getShaderInfoLog(shader)); return null; }
   return shader;
 }
-
 const vertexShader=compileShader(gl.VERTEX_SHADER,vertexShaderSource);
 const fragmentShader=compileShader(gl.FRAGMENT_SHADER,fragmentShaderSource);
 const program=gl.createProgram();
@@ -142,7 +161,7 @@ const posLoc=gl.getAttribLocation(program,"position");
 const resLoc=gl.getUniformLocation(program,"resolution");
 const camPosLoc=gl.getUniformLocation(program,"camPos");
 const camTargetLoc=gl.getUniformLocation(program,"camTarget");
-const timeLoc=gl.getUniformLocation(program,"time");
+const timeLoc=gl.getUniformLocation(program,"shaderTime");
 
 const buffer=gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
@@ -150,17 +169,15 @@ gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,0,1,-1,0,-1,1,0,-1,1,0,1,-
 gl.enableVertexAttribArray(posLoc);
 gl.vertexAttribPointer(posLoc,3,gl.FLOAT,false,0,0);
 
-// Kamera init
 let azimuth=0,elevation=0.4,radius=1.2;
 let targetAzimuth=0,targetElevation=0.4,targetRadius=1.2;
 let isDragging=false,lastX=0,lastY=0,lastDist=null;
-
-// Neue Zoom-Limits
-const MIN_RADIUS = 0.3;  // nicht zu nah
-const MAX_RADIUS = 3.0;  // weiter raus
+const MIN_RADIUS = 0.3;
+const MAX_RADIUS = 3.5;
+function damp(current,target,lambda,dt){ return current + (target-current)*(1.0-Math.exp(-lambda*dt)); }
 
 canvas.addEventListener("mousedown", e=>{isDragging=true; lastX=e.clientX; lastY=e.clientY;});
-canvas.addEventListener("mousemove", e=>{if(isDragging){let dx=e.clientX-lastX; let dy=e.clientY-lastY; targetAzimuth+=dx*0.002; targetElevation+=dy*0.002; lastX=e.clientX; lastY=e.clientY;}} );
+canvas.addEventListener("mousemove", e=>{if(isDragging){let dx=e.clientX-lastX; let dy=e.clientY-lastY; targetAzimuth+=dx*0.002; targetElevation+=dy*0.002; lastX=e.clientX; lastY=e.clientY;}}); 
 window.addEventListener("mouseup", ()=>isDragging=false);
 
 canvas.addEventListener("touchstart", e=>{
@@ -186,20 +203,28 @@ window.addEventListener("wheel", e=>{
   targetRadius = Math.max(MIN_RADIUS, Math.min(MAX_RADIUS, targetRadius));
 });
 
-function render(time){
+let shaderTime = 0.0;
+let lastTime = performance.now()/1000;
+function render(now){
+  now *= 0.001;
+  const dt = now - lastTime;
+  lastTime = now;
+  
+  shaderTime += dt*0.6;
+
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.uniform2f(resLoc,canvas.width,canvas.height);
-  gl.uniform1f(timeLoc,time*0.001);
+  gl.uniform1f(timeLoc, shaderTime);
 
-  azimuth+=(targetAzimuth-azimuth)*0.05;
-  elevation+=(targetElevation-elevation)*0.05;
-  radius+=(targetRadius-radius)*0.05;
+  azimuth = damp(azimuth, targetAzimuth, 8.0, dt);
+  elevation = damp(elevation, targetElevation, 8.0, dt);
+  radius = damp(radius, targetRadius, 8.0, dt);
 
-  targetAzimuth+=0.00003; // Autorotation
+  targetAzimuth += 0.00002;
 
-  const camX=radius*Math.sin(azimuth)*Math.cos(elevation);
-  const camY=radius*Math.sin(elevation);
-  const camZ=radius*Math.cos(azimuth)*Math.cos(elevation);
+  const camX = radius*Math.sin(azimuth)*Math.cos(elevation);
+  const camY = radius*Math.sin(elevation);
+  const camZ = radius*Math.cos(azimuth)*Math.cos(elevation);
   gl.uniform3f(camPosLoc,camX,camY,camZ);
   gl.uniform3f(camTargetLoc,0,0,0);
 
